@@ -3,11 +3,13 @@ from django.db import models
 from organization.models import Organization
 from users.models import CustomUser
 
+
 class OrganizationBaseModel(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
 
     class Meta:
         abstract = True
+
 
 class Category(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -20,21 +22,28 @@ class Category(OrganizationBaseModel):
     def __str__(self):
         return self.name
 
+
 class Product(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     sku = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True)
-    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
-    reorder_level = models.IntegerField()
+    category = models.ForeignKey(
+        Category, on_delete=models.SET_NULL, null=True, blank=True
+    )
     is_active = models.BooleanField(default=True)
-    barcode = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, related_name='products_created')
+    created_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="products_created",
+    )
 
     def __str__(self):
         return self.name
+
 
 class Currency(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -46,6 +55,7 @@ class Currency(OrganizationBaseModel):
     def __str__(self):
         return self.name
 
+
 class UOM(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
@@ -54,24 +64,33 @@ class UOM(OrganizationBaseModel):
     def __str__(self):
         return self.name
 
+
 class ProductVariation(OrganizationBaseModel):
     SIZE_CHOICES = (
-        ('xl', 'Extra Large'),
-        ('l', 'Large'),
-        ('m', 'Medium'),
-        ('s', 'Small'),
-        ('xs', 'Extra Small'),
+        ("xl", "Extra Large"),
+        ("l", "Large"),
+        ("m", "Medium"),
+        ("s", "Small"),
+        ("xs", "Extra Small"),
     )
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='variations')
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="variations"
+    )
     sku = models.CharField(max_length=255, unique=True, blank=True, null=True)
-    cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=10, default=0, decimal_places=2)
     currency = models.ForeignKey(Currency, on_delete=models.SET_NULL, null=True)
     uom = models.ForeignKey(UOM, on_delete=models.SET_NULL, null=True)
     color = models.CharField(max_length=50, blank=True)
-    pack_size = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    measurement = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    pack_size = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    measurement = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
     size = models.CharField(max_length=2, choices=SIZE_CHOICES, null=True, blank=True)
+    reorder_level = models.IntegerField(null=True, blank=True)
+    barcode = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -80,16 +99,22 @@ class ProductVariation(OrganizationBaseModel):
     def name(self):
         parts = [self.product.name]
         if self.pack_size:
-            parts.append(f'{self.pack_size}(pcs)')
+            parts.append(f"{self.pack_size}(pcs)")
         if self.color:
             parts.append(self.color)
         if self.size:
             parts.append(self.get_size_display())
+
+        measurement_parts = []
         if self.measurement:
-            parts.append(str(self.measurement))
+            measurement_parts.append(str(self.measurement))
         if self.uom:
-            parts.append(self.uom.symbol)
-        return ''.join(map(str, parts))
+            measurement_parts.append(self.uom.symbol)
+
+        if measurement_parts:
+            parts.append("".join(measurement_parts))
+
+        return "-".join(parts)
 
     def __str__(self):
         return self.name
