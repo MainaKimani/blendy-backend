@@ -4,6 +4,7 @@ Django settings for blendy_backend project.
 
 from datetime import timedelta
 from pathlib import Path
+from corsheaders.defaults import default_headers
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -18,7 +19,7 @@ SECRET_KEY = "django-insecure-cdtpzpu4fj_sl*551t@rj(&$p+p@o7ra9jgj2f1ekdk-hy6k(w
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -33,6 +34,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_yasg",  # Added for Swagger UI
     "rest_framework_simplejwt",
+    "corsheaders",
     # Local apps
     "authentication",
     "organization",
@@ -42,6 +44,16 @@ INSTALLED_APPS = [
     "products",
     "sales",
     "pricing",
+]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:4200",
+]
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "content-type",
+    "authorization",
+    "x-organization",
 ]
 
 AUTH_USER_MODEL = "users.CustomUser"
@@ -55,6 +67,7 @@ REST_FRAMEWORK = {
 
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
