@@ -20,8 +20,8 @@ class CategoryViewSet(OrganizationBaseViewSet):
     def get_permissions(self):
         if self.action == "list" or self.action == "retrieve":
             return [
-                IsAuthenticated(),
-                IsOrganizationUser(),
+                # IsAuthenticated(),
+                # IsOrganizationUser(),
                 #HasUserPermission("products.view_category"),
             ]
         elif self.action == "create":
@@ -52,8 +52,8 @@ class ProductViewSet(OrganizationBaseViewSet):
     def get_permissions(self):
         if self.action == "list" or self.action == "retrieve":
             return [
-                IsAuthenticated(),
-                IsOrganizationUser(),
+                # IsAuthenticated(),
+                # IsOrganizationUser(),
                 #HasUserPermission("products.view_product"),
             ]
         elif self.action == "create":

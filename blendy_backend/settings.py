@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "drf_yasg",  # Added for Swagger UI
     "rest_framework_simplejwt",
     "corsheaders",
+    'django_extensions',
     # Local apps
     "authentication",
     "organization",
