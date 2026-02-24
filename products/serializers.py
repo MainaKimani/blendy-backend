@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.db import transaction
 from .models import Product, Category, ProductVariation, Currency, UOM
 from pricing.models import PricelistItem
+from django.db import transaction
 
 
 class CurrencySerializer(serializers.ModelSerializer):
@@ -27,11 +28,11 @@ class CategorySerializer(serializers.ModelSerializer):
 
 class ProductVariationSerializer(serializers.ModelSerializer):
     uom = UOMSerializer(read_only=True)
-    uom_id = serializers.UUIDField(write_only=True, source="uom")
+    uom_id = serializers.UUIDField(read_only=True, source="uom")
     currency = CurrencySerializer(read_only=True)
-    currency_id = serializers.UUIDField(write_only=True, source="currency")
+    currency_id = serializers.UUIDField(read_only=True, source="currency")
     name = serializers.CharField(read_only=True)
-    product_id = serializers.UUIDField(write_only=True, source="product")
+    product_id = serializers.UUIDField(read_only=True, source="product")
 
     class Meta:
         model = ProductVariation
@@ -62,7 +63,11 @@ class ProductVariationSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     variations = ProductVariationSerializer(many=True, required=False)
     category = CategorySerializer(read_only=True)
-    category_id = serializers.UUIDField(write_only=True, source="category")
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=Category.objects.all(),
+        source="category",
+        write_only=True,
+    )
 
     class Meta:
         model = Product
@@ -82,14 +87,19 @@ class ProductSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("organization", "category")
 
+    @transaction.atomic
     def create(self, validated_data):
-        variations_data = validated_data.pop('variations', [])
-        with transaction.atomic():
-            product = Product.objects.create(**validated_data)
-            for variation_data in variations_data:
-                ProductVariation.objects.create(
-                    product=product, organization=product.organization, **variation_data
-                )
+        variations_data = validated_data.pop("variations", [])
+        # Create the product first
+        product = Product.objects.create(**validated_data)
+        # Create the variations
+        for variation_data in variations_data:
+            ProductVariation.objects.create(
+                product=product,
+                organization=product.organization,
+                **variation_data
+            )
+
         return product
 
 
