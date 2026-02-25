@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
-from .models import Product, Category, ProductVariation, Currency, UOM
+from .models import Product, Category, ProductImage, ProductVariation, Currency, UOM
 from pricing.models import PricelistItem
 from django.db import transaction
 
@@ -60,8 +60,15 @@ class ProductVariationSerializer(serializers.ModelSerializer):
         read_only_fields = ("organization", "uom", "currency")
 
 
+class ProductImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductImage
+        exclude = ("product",)
+
+
 class ProductSerializer(serializers.ModelSerializer):
     variations = ProductVariationSerializer(many=True, required=False)
+    images = ProductImageSerializer(many=True, required=False)
     category = CategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all(),
@@ -75,6 +82,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "sku",
+            "images",
             "description",
             "category",
             "category_id",
@@ -90,14 +98,21 @@ class ProductSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         variations_data = validated_data.pop("variations", [])
+        images_data = validated_data.pop("images", [])
+
         # Create the product first
         product = Product.objects.create(**validated_data)
+
         # Create the variations
         for variation_data in variations_data:
             ProductVariation.objects.create(
-                product=product,
-                organization=product.organization,
-                **variation_data
+                product=product, organization=product.organization, **variation_data
+            )
+
+        # Create images
+        for image_data in images_data:
+            ProductImage.objects.create(
+                product=product, organization=product.organization, **image_data
             )
 
         return product
