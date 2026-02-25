@@ -63,7 +63,7 @@ class ProductVariationSerializer(serializers.ModelSerializer):
 class ProductImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductImage
-        exclude = ("product",)
+        exclude = ("product", "organization")
 
 
 class ProductSerializer(serializers.ModelSerializer):
