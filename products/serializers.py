@@ -85,6 +85,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "images",
             "description",
             "category",
+            "price",
             "category_id",
             "is_active",
             "created_at",
