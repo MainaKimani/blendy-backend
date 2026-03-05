@@ -67,14 +67,16 @@ class ProductImageSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    variations = ProductVariationSerializer(many=True, required=False)
     images = ProductImageSerializer(many=True, required=False)
     category = CategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all(),
         source="category",
-        write_only=True,
     )
+    available_sizes = ProductVariationSerializer(many=True, read_only=True)
+    variations = serializers.SerializerMethodField()
+    primary_image = serializers.SerializerMethodField()
+    other_images = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -92,13 +94,16 @@ class ProductSerializer(serializers.ModelSerializer):
             "updated_at",
             "created_by",
             "variations",
+            "primary_image",
+            "other_images",
+            "available_sizes",
             "organization",
         )
         read_only_fields = ("organization", "category")
 
     @transaction.atomic
     def create(self, validated_data):
-        variations_data = validated_data.pop("variations", [])
+        variations_data = validated_data.pop("available_sizes", [])
         images_data = validated_data.pop("images", [])
 
         # Create the product first
@@ -117,6 +122,18 @@ class ProductSerializer(serializers.ModelSerializer):
             )
 
         return product
+
+    def get_variations(self, obj):
+        return obj.variations.values_list("size", flat=True)
+    def get_primary_image(self, obj):
+        primary_image = obj.images.filter(is_primary=True).first()
+        if primary_image:
+            return primary_image.image.url
+        return None
+
+    def get_other_images(self, obj):
+        other_images = obj.images.filter(is_primary=False)
+        return [image.image.url for image in other_images]
 
 
 class ProductVariationWithPriceSerializer(ProductVariationSerializer):
