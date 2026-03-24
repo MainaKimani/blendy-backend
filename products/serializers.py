@@ -25,6 +25,49 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ("organization",)
 
+class ProductVariationWriteSerializer(serializers.ModelSerializer):
+    uom_id = serializers.PrimaryKeyRelatedField(
+        queryset=UOM.objects.all(), source="uom", write_only=True
+    )
+    currency_id = serializers.PrimaryKeyRelatedField(
+        queryset=Currency.objects.all(), source="currency", write_only=True
+    )
+    product_id = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(), source="product", write_only=True
+    )
+
+    class Meta:
+        model = ProductVariation
+        fields = (
+            "id",
+            "sku",
+            "cost_price",
+            "uom_id",
+            "currency_id",
+            "color",
+            "pack_size",
+            "measurement",
+            "size",
+            "reorder_level",
+            "barcode",
+            "is_active",
+            "product_id",
+        )
+
+    def create(self, validated_data):
+        if isinstance(validated_data, list):
+            return ProductVariation.objects.bulk_create(
+                [ProductVariation(**item) for item in validated_data]
+            )
+        return ProductVariation.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        # single update
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
 
 class ProductVariationSerializer(serializers.ModelSerializer):
     uom = UOMSerializer(read_only=True)
