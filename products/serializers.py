@@ -25,12 +25,16 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ("organization",)
 
+
 class ProductVariationWriteSerializer(serializers.ModelSerializer):
     uom_id = serializers.PrimaryKeyRelatedField(
-        queryset=UOM.objects.all(), source="uom", write_only=True
+        queryset=UOM.objects.all(), source="uom", write_only=True, required=False
     )
     currency_id = serializers.PrimaryKeyRelatedField(
-        queryset=Currency.objects.all(), source="currency", write_only=True
+        queryset=Currency.objects.all(),
+        source="currency",
+        write_only=True,
+        required=False,
     )
     product_id = serializers.PrimaryKeyRelatedField(
         queryset=Product.objects.all(), source="product", write_only=True
