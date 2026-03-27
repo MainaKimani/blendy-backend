@@ -113,6 +113,32 @@ class ProductImageSerializer(serializers.ModelSerializer):
         exclude = ("product", "organization")
 
 
+class ProductImageWritableSerializer(serializers.ModelSerializer):
+    product_id = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(),
+        source="product",
+        write_only=True
+    )
+    images = ProductImageSerializer(many=True, required=False)
+    class Meta:
+        model = ProductImage
+        fields = ["product_id", "images"]
+
+    @transaction.atomic
+    def create(self, validated_data):
+        images_data = validated_data.pop("images", [])
+
+        # get the product first
+        product = validated_data.get("product")
+
+        for image_data in images_data:
+            ProductImage.objects.create(
+                product=product, organization=product.organization, **image_data
+            )
+
+        return product
+
+
 class ProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, required=False)
     category = CategorySerializer(read_only=True)

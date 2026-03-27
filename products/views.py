@@ -3,10 +3,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from users.permissions import IsOrganizationUser, HasUserPermission
-from .models import Product, Category, ProductVariation, Currency, UOM
+from .models import Product, ProductImage, Category, ProductVariation, Currency, UOM
 from .serializers import (
     ProductSerializer,
     CategorySerializer,
+    ProductImageSerializer,
+    ProductImageWritableSerializer,
     ProductVariationWriteSerializer,
     ProductVariationSerializer,
     ProductWithPriceSerializer,
@@ -14,6 +16,8 @@ from .serializers import (
     UOMSerializer,
 )
 from inventory.views import OrganizationBaseViewSet
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.db import transaction
 
 
 class CategoryViewSet(OrganizationBaseViewSet):
@@ -25,25 +29,25 @@ class CategoryViewSet(OrganizationBaseViewSet):
             return [
                 # IsAuthenticated(),
                 # IsOrganizationUser(),
-                #HasUserPermission("products.view_category"),
+                # HasUserPermission("products.view_category"),
             ]
         elif self.action == "create":
             return [
                 IsAuthenticated(),
                 IsOrganizationUser(),
-                #HasUserPermission("products.add_category"),
+                # HasUserPermission("products.add_category"),
             ]
         elif self.action == "update" or self.action == "partial_update":
             return [
                 IsAuthenticated(),
                 IsOrganizationUser(),
-                #HasUserPermission("products.change_category"),
+                # HasUserPermission("products.change_category"),
             ]
         elif self.action == "destroy":
             return [
                 IsAuthenticated(),
                 IsOrganizationUser(),
-                #HasUserPermission("products.delete_category"),
+                # HasUserPermission("products.delete_category"),
             ]
         return [IsAuthenticated(), IsOrganizationUser()]
 
@@ -57,25 +61,25 @@ class ProductViewSet(OrganizationBaseViewSet):
             return [
                 # IsAuthenticated(),
                 # IsOrganizationUser(),
-                #HasUserPermission("products.view_product"),
+                # HasUserPermission("products.view_product"),
             ]
         elif self.action == "create":
             return [
                 IsAuthenticated(),
                 IsOrganizationUser(),
-                #HasUserPermission("products.add_product"),
+                # HasUserPermission("products.add_product"),
             ]
         elif self.action == "update" or self.action == "partial_update":
             return [
                 IsAuthenticated(),
                 IsOrganizationUser(),
-                #HasUserPermission("products.change_product"),
+                # HasUserPermission("products.change_product"),
             ]
         elif self.action == "destroy":
             return [
                 IsAuthenticated(),
                 IsOrganizationUser(),
-                #HasUserPermission("products.delete_product"),
+                # HasUserPermission("products.delete_product"),
             ]
         return [IsAuthenticated(), IsOrganizationUser()]
 
@@ -109,8 +113,8 @@ class ProductVariationViewSet(OrganizationBaseViewSet):
 
     # Scope queryset by organization (VERY IMPORTANT in multi-tenant)
     def get_queryset(self):
-        return super().get_queryset().filter(
-            organization=self.request.user.organization
+        return (
+            super().get_queryset().filter(organization=self.request.user.organization)
         )
 
     # Bulk + single create support
@@ -164,6 +168,41 @@ class ProductVariationViewSet(OrganizationBaseViewSet):
     #     return [IsAuthenticated(), IsOrganizationUser()]
 
 
+class ProductImageViewSet(OrganizationBaseViewSet):
+    queryset = ProductImage.objects.all()
+    # default (read)
+    serializer_class = ProductImageSerializer
+
+    # Use different serializers for read vs write
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return ProductImageWritableSerializer
+        return ProductImageSerializer
+
+    def get_permissions(self):
+        if self.action == "list" or self.action == "retrieve":
+            return []
+        elif self.action == "create":
+            return [
+                IsAuthenticated(),
+                IsOrganizationUser(),
+                # HasUserPermission("products.add_product"),
+            ]
+        elif self.action == "update" or self.action == "partial_update":
+            return [
+                IsAuthenticated(),
+                IsOrganizationUser(),
+                # HasUserPermission("products.change_product"),
+            ]
+        elif self.action == "destroy":
+            return [
+                IsAuthenticated(),
+                IsOrganizationUser(),
+                # HasUserPermission("products.delete_product"),
+            ]
+        return [IsAuthenticated(), IsOrganizationUser()]
+
+
 class ProductWithPriceViewSet(OrganizationBaseViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductWithPriceSerializer
@@ -171,12 +210,14 @@ class ProductWithPriceViewSet(OrganizationBaseViewSet):
     def get_permissions(self):
         return []
 
+
 class CurrencyViewSet(OrganizationBaseViewSet):
     queryset = Currency.objects.all()
     serializer_class = CurrencySerializer
 
     def get_permissions(self):
         return [IsAuthenticated(), IsOrganizationUser()]
+
 
 class UOMViewSet(OrganizationBaseViewSet):
     queryset = UOM.objects.all()
