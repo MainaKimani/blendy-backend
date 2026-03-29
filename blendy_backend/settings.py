@@ -20,7 +20,7 @@ SECRET_KEY = "django-insecure-cdtpzpu4fj_sl*551t@rj(&$p+p@o7ra9jgj2f1ekdk-hy6k(w
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -68,6 +68,8 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_SCHEMA_CLASS": "rest_framework.schemas.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "blendy_backend.pagination.StandardResultsSetPagination",
+    "PAGE_SIZE": 20,
 }
 
 
@@ -111,11 +113,6 @@ DATABASES = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
     }
-}
-
-REST_FRAMEWORK = {
-    "DEFAULT_PAGINATION_CLASS": "blendy_backend.pagination.StandardResultsSetPagination",
-    "PAGE_SIZE": 20,
 }
 
 SIMPLE_JWT = {
