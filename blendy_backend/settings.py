@@ -20,7 +20,7 @@ SECRET_KEY = "django-insecure-cdtpzpu4fj_sl*551t@rj(&$p+p@o7ra9jgj2f1ekdk-hy6k(w
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -114,7 +114,6 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
-
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),

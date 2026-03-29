@@ -73,7 +73,7 @@ class ProductViewSet(OrganizationBaseViewSet):
     # Optional: Allow users to sort the results (e.g., /?ordering=-price)
     ordering_fields = ["price", "created_at"]
 
-    ordering = ["created_at"]
+    ordering = ["-created_at"]
 
     def get_permissions(self):
         if self.action == "list" or self.action == "retrieve":
