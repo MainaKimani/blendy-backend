@@ -169,9 +169,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "primary_image",
             "other_images",
             "available_sizes",
-            "organization",
+            "tags",
         )
-        read_only_fields = ("organization", "category", "available_sizes")
+        read_only_fields = ("category", "available_sizes")
 
     @transaction.atomic
     def create(self, validated_data):

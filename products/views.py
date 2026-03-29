@@ -16,8 +16,9 @@ from .serializers import (
     UOMSerializer,
 )
 from inventory.views import OrganizationBaseViewSet
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.db import transaction
+from rest_framework import filters
+from django_filters.rest_framework import DjangoFilterBackend
+from .filters import ProductFilter
 
 
 class CategoryViewSet(OrganizationBaseViewSet):
@@ -55,6 +56,24 @@ class CategoryViewSet(OrganizationBaseViewSet):
 class ProductViewSet(OrganizationBaseViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+
+    # Add the backends here
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+
+    # Use the custom FilterSet class instead of the simple list
+    filterset_class = ProductFilter
+
+    # Search is still handled by DRF's SearchFilter
+    search_fields = ["name", "is_active", "sku", "tags"]
+
+    # Optional: Allow users to sort the results (e.g., /?ordering=-price)
+    ordering_fields = ["price", "created_at"]
+
+    ordering = ["created_at"]
 
     def get_permissions(self):
         if self.action == "list" or self.action == "retrieve":

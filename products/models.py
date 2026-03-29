@@ -28,6 +28,7 @@ class Product(OrganizationBaseModel):
     name = models.CharField(max_length=255)
     sku = models.CharField(max_length=255, unique=True, blank=True, null=True)
     description = models.TextField(blank=True)
+    tags = models.CharField(max_length=255, blank=True)
     category = models.ForeignKey(
         Category, on_delete=models.SET_NULL, null=True, blank=True
     )
