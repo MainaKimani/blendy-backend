@@ -68,6 +68,8 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_SCHEMA_CLASS": "rest_framework.schemas.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "blendy_backend.pagination.StandardResultsSetPagination",
+    "PAGE_SIZE": 20,
 }
 
 
@@ -113,10 +115,6 @@ DATABASES = {
     }
 }
 
-REST_FRAMEWORK = {
-    "DEFAULT_PAGINATION_CLASS": "blendy_backend.pagination.StandardResultsSetPagination",
-    "PAGE_SIZE": 20,
-}
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
