@@ -21,24 +21,28 @@ class SaleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Sale
-        fields = "__all__"
-        read_only_fields = ("organization",)
+        fields = (
+            "id",
+            "customer_name",
+            "sale_date",
+            "shipping_fee",
+            "status",
+            "payment_status",
+            "customer_email",
+            "customer_phone",
+            "shipping_city",
+            "shipping_address",
+            "items",
+            "total_amount",
+        )
 
     def create(self, validated_data):
         items_data = validated_data.pop("items")
         request = self.context.get("request")
 
-
         with transaction.atomic():
             # Create the sale record
-            sale = Sale.objects.create(
-                created_by=(
-                    request.user
-                    if (request and request.user.is_authenticated)
-                    else None
-                ),
-                **validated_data
-            )
+            sale = Sale.objects.create(**validated_data)
 
             # Create each SaleItem associated with this sale
             for item_data in items_data:

@@ -1,10 +1,11 @@
+from decimal import Decimal
 import uuid
 from django.db import models
 from users.models import CustomUser
 from products.models import Product, OrganizationBaseModel
 
 
-class Sale(OrganizationBaseModel):
+class Sale(models.Model):
     STATUS_CHOICES = [
         ("PENDING", "Pending"),
         ("COMPLETED", "Completed"),
@@ -20,7 +21,9 @@ class Sale(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     customer_name = models.CharField(max_length=255, blank=True, null=True)
     sale_date = models.DateTimeField(auto_now_add=True)
-    shipping_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    shipping_fee = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="PENDING")
     payment_status = models.CharField(
         max_length=20, choices=PAYMENT_STATUS_CHOICES, default="UNPAID"
@@ -42,7 +45,10 @@ class Sale(OrganizationBaseModel):
 
     @property
     def total_amount(self):
-        return sum(item.total_price for item in self.items.all()) + self.shipping_fee
+        return (
+            sum((item.total_price for item in self.items.all()), Decimal("0.00"))
+            + self.shipping_fee
+        )
 
     def __str__(self):
         return f"Sale {self.id} - {self.total_amount}"
@@ -68,8 +74,12 @@ class SaleItem(models.Model):
         max_length=2, choices=SIZE_CHOICES, blank=True, null=True
     )
     quantity = models.PositiveIntegerField(default=1)
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
-    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    unit_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    discount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
 
     def __str__(self):

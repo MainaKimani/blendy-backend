@@ -146,11 +146,11 @@ class SaleViewSet(OrganizationBaseViewSet):
     def perform_create(self, serializer):
         # If user is anonymous, created_by will be None, which matches your model
         user = self.request.user if self.request.user.is_authenticated else None
-        serializer.save(created_by=user, organization=self.request.organization)
+        serializer.save()
 
     def perform_update(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
-        serializer.save(updated_by=user, organization=self.request.organization)
+        serializer.save()
 
     def get_permissions(self):
         # Allow guests to POST (checkout), but require Auth to GET/PUT/PATCH
