@@ -28,9 +28,13 @@ class PaymentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         sale = attrs.get("sale")
         amount = attrs.get("amount")
-        phone_number = attrs.get("phone_number")
-        if not phone_number and sale and sale.customer_phone:
-            attrs.update({"phone_number": sale.customer_phone if sale else None})
+        provider = attrs.get("provider")
+        if not provider:
+            raise serializers.ValidationError("Payment provider is required.")
+        if provider == Payment.ProviderChoices.MPESA and not attrs.get("phone_number"):
+            raise serializers.ValidationError(
+                "Phone number is required for Mpesa payments."
+            )
 
         normalized_phone = self._normalize_kenyan_phone(attrs.get("phone_number"))
         attrs["phone_number"] = normalized_phone
