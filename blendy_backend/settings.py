@@ -17,6 +17,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-cdtpzpu4fj_sl*551t@rj(&$p+p@o7ra9jgj2f1ekdk-hy6k(w"
 
+PAYMENTS_MPESA_WEBHOOK_SECRET = os.getenv("PAYMENTS_MPESA_WEBHOOK_SECRET", "secret-webhook-key")
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -111,8 +113,14 @@ WSGI_APPLICATION = "blendy_backend.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "mitchyfitsdb",
+        "USER": "app",
+        "PASSWORD": "root",
+        "HOST": "localhost",
+        "PORT": "5432",
+        # "ENGINE": "django.db.backends.sqlite3",
+        # "NAME": BASE_DIR / "db.sqlite3",
     }
 }
 
