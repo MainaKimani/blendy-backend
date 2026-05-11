@@ -8,7 +8,15 @@ from .models import Payment, Refund
 
 class PaymentSerializer(serializers.ModelSerializer):
     SAFARICOM_PREFIXES = {
-        "25470", "25471", "25472", "25474", "25479", "25410", "25411"
+        "25470",
+        "25471",
+        "25472",
+        "25474",
+        "25475",
+        "25476",
+        "25479",
+        "25410",
+        "25411",
     }
 
     class Meta:
@@ -35,9 +43,9 @@ class PaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Phone number is required for Mpesa payments."
             )
-
-        normalized_phone = self._normalize_kenyan_phone(attrs.get("phone_number"))
-        attrs["phone_number"] = normalized_phone
+        if attrs.get("phone_number"):
+            normalized_phone = self._normalize_kenyan_phone(attrs.get("phone_number"))
+            attrs["phone_number"] = normalized_phone
 
         if attrs.get("provider") == Payment.ProviderChoices.MPESA:
             self._validate_safaricom_phone(normalized_phone)

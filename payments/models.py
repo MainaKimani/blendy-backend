@@ -52,10 +52,16 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
-        CustomUser, on_delete=models.SET_NULL, null=True, related_name="payments_created"
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="payments_created",
     )
     updated_by = models.ForeignKey(
-        CustomUser, on_delete=models.SET_NULL, null=True, related_name="payments_updated"
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="payments_updated",
     )
 
     class Meta:
@@ -72,8 +78,12 @@ class Refund(models.Model):
         FAILED = "FAILED", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name="refunds")
-    amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    payment = models.ForeignKey(
+        Payment, on_delete=models.CASCADE, related_name="refunds"
+    )
+    amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
     status = models.CharField(
         max_length=20, choices=StatusChoices.choices, default=StatusChoices.PENDING
     )
