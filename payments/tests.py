@@ -7,8 +7,11 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from payments.models import Payment
+from payments.serializers import PaymentSerializer
 from payments.services.providers.factory import get_provider
-from sales.models import Sale
+from products.models import Product
+from sales.models import Sale, SaleItem
+from organization.models import Organization
 
 
 class PaymentGatewayPhase2Tests(TestCase):
@@ -19,6 +22,17 @@ class PaymentGatewayPhase2Tests(TestCase):
             customer_phone="254700000000",
             customer_email="john@example.com",
             shipping_fee=Decimal("0.00"),
+        )
+
+        organization = Organization.objects.create(name="Org 1", slug="org-1")
+        product = Product.objects.create(name="Shirt", organization=organization, price=Decimal("500.00"))
+        SaleItem.objects.create(
+            sale=self.sale,
+            product=product,
+            quantity=2,
+            unit_price=Decimal("500.00"),
+            discount=Decimal("0.00"),
+            total_price=Decimal("1000.00"),
         )
 
     def test_provider_factory_returns_mpesa_adapter(self):
@@ -56,3 +70,38 @@ class PaymentGatewayPhase2Tests(TestCase):
         self.sale.refresh_from_db()
         self.assertEqual(payment.status, Payment.StatusChoices.SUCCEEDED)
         self.assertEqual(self.sale.payment_status, "PAID")
+
+
+class PaymentPhoneValidationTests(TestCase):
+    def setUp(self):
+        organization = Organization.objects.create(name="Org 2", slug="org-2")
+        self.sale = Sale.objects.create(customer_phone="0700123456", shipping_fee=Decimal("0.00"))
+        product = Product.objects.create(name="Sneaker", organization=organization, price=Decimal("1000.00"))
+        SaleItem.objects.create(
+            sale=self.sale,
+            product=product,
+            quantity=1,
+            unit_price=Decimal("1000.00"),
+            discount=Decimal("0.00"),
+            total_price=Decimal("1000.00"),
+        )
+
+    def test_normalizes_kenyan_phone_to_plus_254(self):
+        serializer = PaymentSerializer(data={
+            "sale": str(self.sale.id),
+            "provider": Payment.ProviderChoices.MANUAL,
+            "amount": "1000.00",
+            "phone_number": "0700 123 456",
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["phone_number"], "+254700123456")
+
+    def test_rejects_non_safaricom_phone_for_mpesa(self):
+        serializer = PaymentSerializer(data={
+            "sale": str(self.sale.id),
+            "provider": Payment.ProviderChoices.MPESA,
+            "amount": "1000.00",
+            "phone_number": "0730123456",
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("M-Pesa payments require a Safaricom phone number.", str(serializer.errors))
