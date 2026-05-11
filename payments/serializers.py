@@ -8,7 +8,6 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = "__all__"
         read_only_fields = (
-            "organization",
             "status",
             "provider_reference",
             "failure_reason",
@@ -22,8 +21,19 @@ class PaymentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         sale = attrs.get("sale")
         amount = attrs.get("amount")
-        if sale and amount and amount <= 0:
-            raise serializers.ValidationError("Payment amount must be greater than zero.")
+        phone_number = attrs.get("phone_number")
+        if not phone_number and sale and sale.customer_phone:
+            attrs.update({"phone_number": sale.customer_phone if sale else None})
+        if amount <= 0:
+            raise serializers.ValidationError(
+                "Payment amount must be greater than zero."
+            )
+        if sale and amount and amount != sale.total_amount:
+            raise serializers.ValidationError(
+                "Payment amount must equal the sale total amount. Expected: {}".format(
+                    sale.total_amount
+                )
+            )
         return attrs
 
 
@@ -42,8 +52,10 @@ class PaymentStatusUpdateSerializer(serializers.Serializer):
             payment.sale.payment_status = "PAID"
         elif status_value == Payment.StatusChoices.REFUNDED:
             payment.sale.payment_status = "REFUNDED"
-        elif status_value in [Payment.StatusChoices.FAILED, Payment.StatusChoices.CANCELLED]:
-            payment.sale.payment_status = "UNPAID"
+        elif status_value == Payment.StatusChoices.FAILED:
+            payment.sale.payment_status = "FAILED"
+        elif status_value == Payment.StatusChoices.CANCELLED:
+            payment.sale.payment_status = "CANCELLED"
 
         payment.sale.save(update_fields=["payment_status"])
         payment.save()
@@ -55,7 +67,6 @@ class RefundSerializer(serializers.ModelSerializer):
         model = Refund
         fields = "__all__"
         read_only_fields = (
-            "organization",
             "status",
             "provider_reference",
             "created_at",

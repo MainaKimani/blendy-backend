@@ -6,7 +6,7 @@ from products.models import OrganizationBaseModel
 from sales.models import Sale
 
 
-class Payment(OrganizationBaseModel):
+class Payment(models.Model):
     class ProviderChoices(models.TextChoices):
         MPESA = "MPESA", "M-Pesa"
         MANUAL = "MANUAL", "Manual"
@@ -50,7 +50,7 @@ class Payment(OrganizationBaseModel):
         return f"{self.provider} payment {self.id} ({self.status})"
 
 
-class Refund(OrganizationBaseModel):
+class Refund(models.Model):
     class StatusChoices(models.TextChoices):
         PENDING = "PENDING", "Pending"
         SUCCEEDED = "SUCCEEDED", "Succeeded"
