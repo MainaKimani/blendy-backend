@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.utils import timezone
 from rest_framework import serializers
 from .models import Payment, Refund
@@ -24,7 +26,7 @@ class PaymentSerializer(serializers.ModelSerializer):
         phone_number = attrs.get("phone_number")
         if not phone_number and sale and sale.customer_phone:
             attrs.update({"phone_number": sale.customer_phone if sale else None})
-        if amount <= 0:
+        if amount is not None and amount <= Decimal("0.00"):
             raise serializers.ValidationError(
                 "Payment amount must be greater than zero."
             )
@@ -47,6 +49,7 @@ class PaymentStatusUpdateSerializer(serializers.Serializer):
         payment.status = status_value
         payment.provider_reference = self.validated_data.get("provider_reference", "")
         payment.failure_reason = self.validated_data.get("failure_reason", "")
+
         if status_value == Payment.StatusChoices.SUCCEEDED:
             payment.paid_at = timezone.now()
             payment.sale.payment_status = "PAID"
@@ -72,3 +75,19 @@ class RefundSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def validate(self, attrs):
+        amount = attrs.get("amount")
+        payment = attrs.get("payment")
+
+        if amount is None or amount <= Decimal("0.00"):
+            raise serializers.ValidationError(
+                "Refund amount must be greater than zero."
+            )
+
+        if payment and amount > payment.amount:
+            raise serializers.ValidationError(
+                "Refund amount cannot be greater than payment amount."
+            )
+
+        return attrs
