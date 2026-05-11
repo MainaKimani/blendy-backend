@@ -7,6 +7,11 @@ from sales.models import Sale
 
 
 class Payment(models.Model):
+    class ReconciliationStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        MATCHED = "MATCHED", "Matched"
+        MISMATCH = "MISMATCH", "Mismatch"
+
     class ProviderChoices(models.TextChoices):
         MPESA = "MPESA", "M-Pesa"
         MANUAL = "MANUAL", "Manual"
@@ -33,6 +38,16 @@ class Payment(models.Model):
     provider_reference = models.CharField(max_length=255, blank=True)
     idempotency_key = models.CharField(max_length=255, blank=True)
     failure_reason = models.TextField(blank=True)
+    retry_count = models.PositiveIntegerField(default=0)
+    max_retries = models.PositiveIntegerField(default=5)
+    next_retry_at = models.DateTimeField(blank=True, null=True)
+    last_retry_at = models.DateTimeField(blank=True, null=True)
+    reconciliation_status = models.CharField(
+        max_length=20,
+        choices=ReconciliationStatus.choices,
+        default=ReconciliationStatus.PENDING,
+    )
+    reconciled_at = models.DateTimeField(blank=True, null=True)
     paid_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
