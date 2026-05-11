@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "products",
     "sales",
     "pricing",
+    "payments",
 ]
 
 # CORS_ALLOWED_ORIGINS = [
