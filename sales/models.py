@@ -14,7 +14,9 @@ class Sale(models.Model):
 
     PAYMENT_STATUS_CHOICES = [
         ("UNPAID", "Unpaid"),
+        ("FAILED", "Failed"),
         ("PAID", "Paid"),
+        ("CANCELLED", "Cancelled"),
         ("REFUNDED", "Refunded"),
     ]
 

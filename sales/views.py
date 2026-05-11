@@ -156,7 +156,7 @@ class SaleViewSet(OrganizationBaseViewSet):
         # Allow guests to POST (checkout), but require Auth to GET/PUT/PATCH
         if self.action == "create":
             return []
-        return [IsAuthenticated(), IsOrganizationUser()]
+        return []
 
 
 class SaleItemViewSet(viewsets.ModelViewSet):
