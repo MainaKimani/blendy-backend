@@ -14,6 +14,7 @@ from users.permissions import IsOrganizationUser
 from .models import Payment, Refund
 from .serializers import PaymentSerializer, PaymentStatusUpdateSerializer, RefundSerializer
 from .services.providers.factory import get_provider
+from .services.ops.retry import schedule_next_retry
 from .services.webhooks.signature import InvalidWebhookSignature, verify_mpesa_signature
 
 
@@ -84,13 +85,21 @@ class MpesaWebhookView(APIView):
             payment.sale.payment_status = "PAID"
             payment.paid_at = timezone.now()
             payment.failure_reason = ""
+            payment.reconciliation_status = Payment.ReconciliationStatus.MATCHED
+            payment.reconciled_at = timezone.now()
+            payment.next_retry_at = None
         else:
             payment.status = Payment.StatusChoices.FAILED
             payment.sale.payment_status = "FAILED"
             payment.failure_reason = request.data.get("ResultDesc", "Payment failed")
+            payment.reconciliation_status = Payment.ReconciliationStatus.MISMATCH
 
         payment.sale.save(update_fields=["payment_status"])
-        payment.save(update_fields=["status", "paid_at", "failure_reason", "updated_at"])
+        payment.save(update_fields=[
+            "status", "paid_at", "failure_reason", "reconciliation_status", "reconciled_at", "next_retry_at", "updated_at"
+        ])
+        if payment.status == Payment.StatusChoices.FAILED and payment.retry_count < payment.max_retries:
+            schedule_next_retry(payment)
 
         return Response({"detail": "Webhook processed"}, status=status.HTTP_200_OK)
 
