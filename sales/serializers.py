@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from django.db import transaction
+
+from payments.serializers import PaymentSerializer
 from .models import Sale, SaleItem
 
 
@@ -18,6 +20,7 @@ class SaleSerializer(serializers.ModelSerializer):
     total_amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, read_only=True
     )
+    payments = PaymentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Sale
@@ -33,6 +36,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "shipping_city",
             "shipping_address",
             "items",
+            "payments",
             "total_amount",
         )
 

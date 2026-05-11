@@ -5,7 +5,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from django.conf import settings
+from decouple import config
 
 from .base import BasePaymentProvider, ProviderChargeResult
 
@@ -20,7 +20,7 @@ class MpesaPaymentProvider(BasePaymentProvider):
     provider_name = "MPESA"
 
     def _get_setting(self, key: str, default: str = "") -> str:
-        return str(getattr(settings, key, default))
+        return config(key, default=default)
 
     def _get_access_token(self) -> str:
         consumer_key = self._get_setting("MPESA_CONSUMER_KEY")
@@ -58,7 +58,7 @@ class MpesaPaymentProvider(BasePaymentProvider):
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         token = self._get_access_token()
         shortcode = self._get_setting("MPESA_SHORTCODE")
-        account_reference = self._get_setting("MPESA_ACCOUNT_REFERENCE", "Blendy")
+        account_reference = self._get_setting("MPESA_ACCOUNT_REFERENCE", "Mitchy Fits")
         transaction_desc = self._get_setting("MPESA_TRANSACTION_DESC", "Payment")
 
         payload = {
@@ -94,20 +94,39 @@ class MpesaPaymentProvider(BasePaymentProvider):
         except URLError as exc:
             raise ValueError(f"MPESA STK request error: {exc.reason}") from exc
 
-        reference = response_payload.get("CheckoutRequestID") or response_payload.get("MerchantRequestID") or ""
-        if not reference:
-            raise ValueError("MPESA did not return a checkout reference")
+        provider_reference = response_payload.get("CheckoutRequestID") or ""
+        if not provider_reference:
+            raise ValueError("MPESA did not return a checkout request ID")
+        merchant_reference = response_payload.get("MerchantRequestID") or ""
+        if not merchant_reference:
+            raise ValueError("MPESA did not return a merchant request ID")
 
         return ProviderChargeResult(
-            reference=reference,
+            provider_reference=provider_reference,
+            merchant_reference=merchant_reference,
             status="PENDING",
             raw_response=response_payload,
         )
 
     def parse_webhook_payload(self, payload: dict):
-        # Normalize multiple possible MPESA callback payload field names.
-        return {
-            "provider_reference": payload.get("provider_reference") or payload.get("CheckoutRequestID", ""),
-            "status": payload.get("status") or payload.get("ResultCode"),
-            "failure_reason": payload.get("failure_reason") or payload.get("ResultDesc", ""),
+        response_data = payload.get("Body", {}).get("stkCallback", {})
+        if not response_data:
+            raise ValueError("Invalid MPESA webhook payload: missing Body.stkCallback")
+        metadata = response_data.get("CallbackMetadata")
+        if metadata and "Item" in metadata:
+            items = metadata["Item"]
+            # Use a dictionary comprehension to flatten the 'Item' list into a single dictionary
+            parsed_data = {item["Name"]: item.get("Value") for item in items}
+
+        payload = {
+            "checkout_request_id": response_data.get("CheckoutRequestID"),
+            "merchant_request_id": response_data.get("MerchantRequestID"),
+            "phone_number:": parsed_data.get("PhoneNumber") if metadata else None,
+            "amount": parsed_data.get("Amount") if metadata else None,
+            "transaction_date": parsed_data.get("TransactionDate") if metadata else None,
+            "mpesa_receipt_number": parsed_data.get("MpesaReceiptNumber") if metadata else None,
+            "amount": parsed_data.get("Amount") if metadata else None,
+            "ResultCode": response_data.get("ResultCode"),
+            "ResultDesc": response_data.get("ResultDesc"),
         }
+        return payload

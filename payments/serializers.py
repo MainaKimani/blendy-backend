@@ -3,13 +3,31 @@ import re
 
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Payment, Refund
+from .models import MpesaTransaction, Payment, Refund
+
+
+class MpesaTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MpesaTransaction
+        fields = "__all__"
+        read_only_fields = ("id", "created_at")
 
 
 class PaymentSerializer(serializers.ModelSerializer):
     SAFARICOM_PREFIXES = {
-        "25470", "25471", "25472", "25474", "25479", "25410", "25411"
+        "25470",
+        "25471",
+        "25472",
+        "25474",
+        "25474",
+        "25475",
+        "25476",
+        "25477",
+        "25479",
+        "25410",
+        "25411",
     }
+    transactions = MpesaTransactionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Payment
@@ -28,12 +46,16 @@ class PaymentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         sale = attrs.get("sale")
         amount = attrs.get("amount")
-        phone_number = attrs.get("phone_number")
-        if not phone_number and sale and sale.customer_phone:
-            attrs.update({"phone_number": sale.customer_phone if sale else None})
-
-        normalized_phone = self._normalize_kenyan_phone(attrs.get("phone_number"))
-        attrs["phone_number"] = normalized_phone
+        provider = attrs.get("provider")
+        if not provider:
+            raise serializers.ValidationError("Provider is required.")
+        if provider == Payment.ProviderChoices.MPESA and not attrs.get("phone_number"):
+            raise serializers.ValidationError(
+                "Phone number is required for M-Pesa payments."
+            )
+        if attrs.get("phone_number"):
+            normalized_phone = self._normalize_kenyan_phone(attrs.get("phone_number"))
+            attrs["phone_number"] = normalized_phone
 
         if attrs.get("provider") == Payment.ProviderChoices.MPESA:
             self._validate_safaricom_phone(normalized_phone)
