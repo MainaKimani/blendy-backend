@@ -6,7 +6,8 @@ from typing import Any
 class ProviderChargeResult:
     """Standard response shape returned by provider adapters."""
 
-    reference: str
+    provider_reference: str
+    merchant_reference: str
     status: str
     raw_response: dict[str, Any]
 
