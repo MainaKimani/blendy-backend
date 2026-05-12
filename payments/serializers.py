@@ -56,10 +56,13 @@ class PaymentSerializer(serializers.ModelSerializer):
         if attrs.get("phone_number"):
             normalized_phone = self._normalize_kenyan_phone(attrs.get("phone_number"))
             attrs["phone_number"] = normalized_phone
-
+        
         if attrs.get("provider") == Payment.ProviderChoices.MPESA:
             self._validate_safaricom_phone(normalized_phone)
 
+        if not amount:
+            attrs.setdefault("amount", sale.total_amount if sale else Decimal("0.00"))
+            
         if amount is not None and amount <= Decimal("0.00"):
             raise serializers.ValidationError(
                 "Payment amount must be greater than zero."

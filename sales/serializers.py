@@ -60,3 +60,26 @@ class SaleSerializer(serializers.ModelSerializer):
                 SaleItem.objects.create(sale=sale, total_price=line_total, **item_data)
 
         return sale
+    
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", None)
+    
+        with transaction.atomic():
+            # Update the Sale fields
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+    
+            if items_data is not None:
+                # Delete existing items and recreate
+                instance.items.all().delete()
+    
+                for item_data in items_data:
+                    quantity = item_data.get("quantity")
+                    unit_price = item_data.get("unit_price")
+                    discount = item_data.get("discount", 0.00)
+                    line_total = (quantity * unit_price) - discount
+    
+                    SaleItem.objects.create(sale=instance, total_price=line_total, **item_data)
+    
+        return instance
