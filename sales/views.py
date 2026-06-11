@@ -139,7 +139,7 @@ class IssueStockToAgentView(APIView):
             )
 
 
-class SaleViewSet(OrganizationBaseViewSet):
+class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
 
@@ -164,4 +164,4 @@ class SaleItemViewSet(viewsets.ModelViewSet):
     serializer_class = SaleItemSerializer
 
     def get_permissions(self):
-        return [IsAuthenticated(), IsOrganizationUser()]
+        return [IsAuthenticated()]

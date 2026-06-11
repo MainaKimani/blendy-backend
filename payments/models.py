@@ -95,7 +95,7 @@ class MpesaTransaction(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"MpesaTransaction {self.mpesa_receipt_number or self.checkout_request_id} ({self.status})"
+        return f"MpesaTransaction {self.mpesa_receipt_number or self.checkout_request_id} ({self.phone_number})"
 
 
 class Refund(models.Model):
