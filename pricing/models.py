@@ -1,14 +1,7 @@
 import uuid
 from django.db import models
-from organization.models import Organization
-from products.models import Product
-
-
-class OrganizationBaseModel(models.Model):
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-
-    class Meta:
-        abstract = True
+from organization.models import OrganizationBaseModel
+from products.models import ProductVariation
 
 
 class Pricelist(OrganizationBaseModel):
@@ -16,6 +9,10 @@ class Pricelist(OrganizationBaseModel):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    # Every organization gets one at onboarding, named "Default Pricelist". It is
+    # what sales are priced from, so an organization without one cannot transact.
+    # Flagged rather than matched by name, so renaming it does not break pricing.
+    is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -23,13 +20,15 @@ class Pricelist(OrganizationBaseModel):
         return self.name
 
 
-class PricelistItem(models.Model):
+class PricelistItem(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     pricelist = models.ForeignKey(
         Pricelist, on_delete=models.CASCADE, related_name="items"
     )
-    product = models.ForeignKey(
-        Product,
+    # Pricing is per sellable unit, and the variation is the sellable unit, so
+    # a price applies to a variation rather than to the parent product.
+    product_variation = models.ForeignKey(
+        ProductVariation,
         on_delete=models.CASCADE,
         related_name="pricelist_items",
     )
@@ -38,7 +37,9 @@ class PricelistItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.product} - {self.pricelist.name} - {self.price}"
+        return f"{self.product_variation} - {self.pricelist.name} - {self.price}"
 
     class Meta:
-        unique_together = ("pricelist", "product")
+        unique_together = ("pricelist", "product_variation")
+        # Deterministic order so paginated listings are stable between requests.
+        ordering = ["-created_at"]

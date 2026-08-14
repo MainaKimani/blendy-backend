@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 from decimal import Decimal
 from unittest.mock import Mock, patch
@@ -11,29 +9,33 @@ from payments.models import Payment
 from payments.serializers import PaymentSerializer
 from payments.services.providers.factory import get_provider
 from payments.services.providers.mpesa import MpesaPaymentProvider
-from products.models import Product
+from products.models import Product, ProductVariation
 from sales.models import Sale, SaleItem
 from organization.models import Organization
+from blendy_backend.testing import make_organization, make_priced_variation
 
 
 class PaymentGatewayPhase2Tests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        organization = make_organization("Org 1", "org-1")
         self.sale = Sale.objects.create(
+            organization=organization,
             customer_name="John Doe",
             customer_phone="254700000000",
             customer_email="john@example.com",
             shipping_fee=Decimal("0.00"),
         )
 
-        organization = Organization.objects.create(name="Org 1", slug="org-1")
-        product = Product.objects.create(name="Shirt", organization=organization, price=Decimal("500.00"))
+        variation = make_priced_variation(organization, "Shirt", Decimal("500.00"))
         SaleItem.objects.create(
             sale=self.sale,
-            product=product,
+            organization=organization,
+            product_variation=variation,
             quantity=2,
             unit_price=Decimal("500.00"),
             discount=Decimal("0.00"),
+            selling_price=Decimal("500.00"),
             total_price=Decimal("1000.00"),
         )
 
@@ -47,7 +49,9 @@ class PaymentGatewayPhase2Tests(TestCase):
     )
     def test_provider_factory_returns_mpesa_adapter(self, _mock_token, mock_urlopen):
         mock_response = Mock()
-        mock_response.read.return_value = json.dumps({"CheckoutRequestID": "ws_CO_123"}).encode("utf-8")
+        mock_response.read.return_value = json.dumps(
+            {"CheckoutRequestID": "ws_CO_123", "MerchantRequestID": "mr-123"}
+        ).encode("utf-8")
         mock_urlopen.return_value.__enter__.return_value = mock_response
 
         provider = get_provider(Payment.ProviderChoices.MPESA)
@@ -58,26 +62,155 @@ class PaymentGatewayPhase2Tests(TestCase):
             idempotency_key="idem-123",
         )
         self.assertEqual(charge.status, "PENDING")
-        self.assertEqual(charge.reference, "ws_CO_123")
+        self.assertEqual(charge.provider_reference, "ws_CO_123")
+        self.assertEqual(charge.merchant_reference, "mr-123")
 
-    @override_settings(PAYMENTS_MPESA_WEBHOOK_SECRET="secret")
+    def _make_payment(self, amount=Decimal("1000.00")):
+        return Payment.objects.create(
+            organization=self.sale.organization,
+            sale=self.sale,
+            provider="MPESA",
+            amount=amount,
+            provider_reference="ref-1",
+            merchant_reference="mr-1",
+            phone_number="+254700000000",
+            status=Payment.StatusChoices.PENDING,
+        )
+
+    def _callback_payload(self, amount=1000.00, result_code=0):
+        callback = {
+            "MerchantRequestID": "mr-1",
+            "CheckoutRequestID": "ref-1",
+            "ResultCode": result_code,
+            "ResultDesc": "The service request is processed successfully.",
+        }
+        if result_code == 0:
+            callback["CallbackMetadata"] = {
+                "Item": [
+                    {"Name": "Amount", "Value": amount},
+                    {"Name": "MpesaReceiptNumber", "Value": "QK12AB34CD"},
+                    {"Name": "PhoneNumber", "Value": 254700000000},
+                ]
+            }
+        return {"Body": {"stkCallback": callback}}
+
+    @override_settings(
+        MPESA_WEBHOOK_TOKEN="tok-123", MPESA_WEBHOOK_ENFORCE_IP=False
+    )
+    def test_mpesa_webhook_rejects_a_bad_token(self):
+        payment = self._make_payment()
+
+        response = self.client.post(
+            "/api/payments/webhooks/mpesa/wrong-token/",
+            data=self._callback_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.StatusChoices.PENDING)
+
+    @override_settings(MPESA_WEBHOOK_TOKEN="", MPESA_WEBHOOK_ENFORCE_IP=False)
+    def test_mpesa_webhook_fails_closed_when_token_unconfigured(self):
+        self._make_payment()
+
+        response = self.client.post(
+            "/api/payments/webhooks/mpesa/anything/",
+            data=self._callback_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(
+        MPESA_WEBHOOK_TOKEN="tok-123",
+        MPESA_WEBHOOK_ENFORCE_IP=True,
+        MPESA_WEBHOOK_IP_ALLOWLIST=["196.201.214.200"],
+    )
+    def test_mpesa_webhook_rejects_a_non_allowlisted_ip(self):
+        self._make_payment()
+
+        response = self.client.post(
+            "/api/payments/webhooks/mpesa/tok-123/",
+            data=self._callback_payload(),
+            format="json",
+            REMOTE_ADDR="203.0.113.9",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(
+        MPESA_WEBHOOK_TOKEN="tok-123", MPESA_WEBHOOK_ENFORCE_IP=False
+    )
+    def test_mpesa_webhook_rejects_amount_mismatch(self):
+        """A success callback for the wrong amount must not mark the sale paid."""
+        payment = self._make_payment(amount=Decimal("1000.00"))
+
+        response = self.client.post(
+            "/api/payments/webhooks/mpesa/tok-123/",
+            data=self._callback_payload(amount=10.00),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.sale.refresh_from_db()
+        self.assertNotEqual(payment.status, Payment.StatusChoices.SUCCEEDED)
+        self.assertEqual(
+            payment.reconciliation_status, Payment.ReconciliationStatus.MISMATCH
+        )
+        self.assertEqual(self.sale.payment_status, "UNPAID")
+
+    @override_settings(
+        MPESA_WEBHOOK_TOKEN="tok-123", MPESA_WEBHOOK_ENFORCE_IP=False
+    )
+    def test_mpesa_webhook_handles_malformed_payload_without_500(self):
+        self._make_payment()
+
+        response = self.client.post(
+            "/api/payments/webhooks/mpesa/tok-123/",
+            data={"unexpected": "shape"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @override_settings(
+        MPESA_WEBHOOK_TOKEN="tok-123", MPESA_WEBHOOK_ENFORCE_IP=False
+    )
     def test_mpesa_webhook_updates_payment_status(self):
         payment = Payment.objects.create(
+            organization=self.sale.organization,
             sale=self.sale,
             provider="MPESA",
             amount=Decimal("1000.00"),
             provider_reference="ref-1",
+            merchant_reference="mr-1",
+            phone_number="+254700000000",
             status=Payment.StatusChoices.PENDING,
         )
-        payload = {"provider_reference": "ref-1", "ResultCode": 0, "ResultDesc": "Success"}
-        body = json.dumps(payload).encode("utf-8")
-        signature = hmac.new(b"secret", body, hashlib.sha256).hexdigest()
+        payload = {
+            "Body": {
+                "stkCallback": {
+                    "MerchantRequestID": "mr-1",
+                    "CheckoutRequestID": "ref-1",
+                    "ResultCode": 0,
+                    "ResultDesc": "The service request is processed successfully.",
+                    "CallbackMetadata": {
+                        "Item": [
+                            {"Name": "Amount", "Value": 1000.00},
+                            {"Name": "MpesaReceiptNumber", "Value": "QK12AB34CD"},
+                            {"Name": "PhoneNumber", "Value": 254700000000},
+                        ]
+                    },
+                }
+            }
+        }
 
         response = self.client.post(
-            "/api/payments/webhooks/mpesa/",
+            "/api/payments/webhooks/mpesa/tok-123/",
             data=payload,
             format="json",
-            HTTP_X_MPESA_SIGNATURE=signature,
         )
         self.assertEqual(response.status_code, 200)
         payment.refresh_from_db()
@@ -88,15 +221,21 @@ class PaymentGatewayPhase2Tests(TestCase):
 
 class PaymentPhoneValidationTests(TestCase):
     def setUp(self):
-        organization = Organization.objects.create(name="Org 2", slug="org-2")
-        self.sale = Sale.objects.create(customer_phone="0700123456", shipping_fee=Decimal("0.00"))
-        product = Product.objects.create(name="Sneaker", organization=organization, price=Decimal("1000.00"))
+        organization = make_organization("Org 2", "org-2")
+        self.sale = Sale.objects.create(
+            organization=organization,
+            customer_phone="0700123456",
+            shipping_fee=Decimal("0.00"),
+        )
+        variation = make_priced_variation(organization, "Sneaker", Decimal("1000.00"))
         SaleItem.objects.create(
             sale=self.sale,
-            product=product,
+            organization=organization,
+            product_variation=variation,
             quantity=1,
             unit_price=Decimal("1000.00"),
             discount=Decimal("0.00"),
+            selling_price=Decimal("1000.00"),
             total_price=Decimal("1000.00"),
         )
 

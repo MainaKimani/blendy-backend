@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CustomUser, SalesAgentProfile
+from .models import CustomUser
 from authorization.models import OrganizationRole, UserRoleAssignment
 
 
@@ -75,11 +75,3 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     f"Organization role with ID {org_role_id} not found or not valid for this organization."
                 )
-
-
-class SalesAgentProfileSerializer(serializers.ModelSerializer):
-    user = CustomUserSerializer(read_only=True)
-
-    class Meta:
-        model = SalesAgentProfile
-        fields = "__all__"

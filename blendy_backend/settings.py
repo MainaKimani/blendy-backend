@@ -19,6 +19,52 @@ SECRET_KEY = "django-insecure-cdtpzpu4fj_sl*551t@rj(&$p+p@o7ra9jgj2f1ekdk-hy6k(w
 
 PAYMENTS_MPESA_WEBHOOK_SECRET = os.getenv("PAYMENTS_MPESA_WEBHOOK_SECRET", "secret-webhook-key")
 
+# --- M-Pesa callback authentication -----------------------------------------
+# Safaricom does not sign STK callbacks, so the callback is authenticated by an
+# unguessable token in the URL plus a source-IP allowlist. The token must match
+# the path in MPESA_CALLBACK_URL registered with Daraja.
+MPESA_WEBHOOK_TOKEN = os.getenv("MPESA_WEBHOOK_TOKEN", "")
+
+# Verify the published Safaricom egress ranges against current Daraja docs
+# before relying on this list in production.
+MPESA_WEBHOOK_IP_ALLOWLIST = [
+    ip.strip()
+    for ip in os.getenv(
+        "MPESA_WEBHOOK_IP_ALLOWLIST",
+        "196.201.214.200,196.201.214.206,196.201.213.114,196.201.214.207,"
+        "196.201.214.208,196.201.213.44,196.201.212.127,196.201.212.138,"
+        "196.201.212.129,196.201.212.136,196.201.212.74,196.201.212.69",
+    ).split(",")
+    if ip.strip()
+]
+
+# Disable only for local sandbox testing through a tunnel, where the source IP
+# is the tunnel's rather than Safaricom's.
+MPESA_WEBHOOK_ENFORCE_IP = (
+    os.getenv("MPESA_WEBHOOK_ENFORCE_IP", "true").lower() == "true"
+)
+
+# Only enable behind a proxy that overwrites X-Forwarded-For; otherwise the
+# header is caller-controlled and the IP allowlist becomes meaningless.
+MPESA_WEBHOOK_TRUST_FORWARDED_FOR = (
+    os.getenv("MPESA_WEBHOOK_TRUST_FORWARDED_FOR", "false").lower() == "true"
+)
+
+# --- Direct (C2B) payment reconciliation ------------------------------------
+# How long a sale left in AWAITING_DIRECT_PAYMENT stays eligible to be matched
+# against an inbound direct payment.
+MPESA_DIRECT_MATCH_WINDOW_HOURS = int(
+    os.getenv("MPESA_DIRECT_MATCH_WINDOW_HOURS", "24")
+)
+
+# Permitted difference between the amount paid and the sale total. Zero means
+# exact match; anything else is surfaced for manual matching instead.
+MPESA_DIRECT_MATCH_TOLERANCE = os.getenv("MPESA_DIRECT_MATCH_TOLERANCE", "0.00")
+
+# The Till/Paybill this deployment collects on. Used to attribute inbound C2B
+# confirmations while organizations have no per-tenant shortcode of their own.
+MPESA_SHORTCODE = os.getenv("MPESA_SHORTCODE", "")
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -73,6 +119,11 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "rest_framework.schemas.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "blendy_backend.pagination.StandardResultsSetPagination",
     "PAGE_SIZE": 20,
+    # Applied only to anonymous payment creation; see payments/throttles.py.
+    "DEFAULT_THROTTLE_RATES": {
+        "stk_push_phone": os.getenv("THROTTLE_STK_PUSH_PHONE", "5/hour"),
+        "stk_push_ip": os.getenv("THROTTLE_STK_PUSH_IP", "20/hour"),
+    },
 }
 
 

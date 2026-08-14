@@ -2,11 +2,11 @@ from decimal import Decimal
 import uuid
 from django.db import models
 from users.models import CustomUser
-from products.models import OrganizationBaseModel
+from organization.models import OrganizationBaseModel
 from sales.models import Sale
 
 
-class Payment(models.Model):
+class Payment(OrganizationBaseModel):
     class ReconciliationStatus(models.TextChoices):
         PENDING = "PENDING", "Pending"
         MATCHED = "MATCHED", "Matched"
@@ -72,7 +72,7 @@ class Payment(models.Model):
         return f"{self.provider} payment {self.id} ({self.status})"
 
 
-class MpesaTransaction(models.Model):
+class MpesaTransaction(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant_request_id = models.CharField(max_length=100, blank=True, null=True)
     checkout_request_id = models.CharField(max_length=100)
@@ -82,7 +82,10 @@ class MpesaTransaction(models.Model):
     description = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     mpesa_receipt_number = models.CharField(max_length=100, blank=True, null=True)
-    transaction_date = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    # M-Pesa's own timestamp for the transaction. Previously auto_now_add, which
+    # silently overwrote it with our receive time; reconciliation needs the real
+    # value, so it is now set from the callback payload.
+    transaction_date = models.DateTimeField(blank=True, null=True)
     payment = models.ForeignKey(
         Payment,
         on_delete=models.SET_NULL,
@@ -90,6 +93,9 @@ class MpesaTransaction(models.Model):
         blank=True,
         related_name="transactions",
     )
+    # Why an inbound direct payment could not be auto-reconciled, so the pending
+    # queue can explain itself to whoever resolves it by hand.
+    reconciliation_note = models.TextField(blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -98,7 +104,7 @@ class MpesaTransaction(models.Model):
         return f"MpesaTransaction {self.mpesa_receipt_number or self.checkout_request_id} ({self.phone_number})"
 
 
-class Refund(models.Model):
+class Refund(OrganizationBaseModel):
     class StatusChoices(models.TextChoices):
         PENDING = "PENDING", "Pending"
         SUCCEEDED = "SUCCEEDED", "Succeeded"

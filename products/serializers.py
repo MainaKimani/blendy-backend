@@ -2,7 +2,13 @@ from rest_framework import serializers
 from django.db import transaction
 from .models import Product, Category, ProductImage, ProductVariation, Currency, UOM
 from pricing.models import PricelistItem
-from django.db import transaction
+from pricing.services import (
+    PricelistUnavailable,
+    get_default_pricelist,
+    get_price,
+    require_default_pricelist,
+    set_price,
+)
 
 
 class CurrencySerializer(serializers.ModelSerializer):
@@ -27,6 +33,11 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class ProductVariationWriteSerializer(serializers.ModelSerializer):
+    # The selling price is not a property of the variation: it is written to the
+    # organization's default pricelist, which is what sales are priced from.
+    selling_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, write_only=True
+    )
     uom_id = serializers.PrimaryKeyRelatedField(
         queryset=UOM.objects.all(), source="uom", write_only=True, required=False
     )
@@ -46,6 +57,7 @@ class ProductVariationWriteSerializer(serializers.ModelSerializer):
             "id",
             "sku",
             "cost_price",
+            "selling_price",
             "uom_id",
             "currency_id",
             "color",
@@ -59,11 +71,11 @@ class ProductVariationWriteSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        if isinstance(validated_data, list):
-            return ProductVariation.objects.bulk_create(
-                [ProductVariation(**item) for item in validated_data]
-            )
-        return ProductVariation.objects.create(**validated_data)
+        # Handled by the viewset, which has the tenant needed to resolve the
+        # pricelist the price belongs on.
+        raise NotImplementedError(
+            "Create variations through ProductVariationViewSet."
+        )
 
     def update(self, instance, validated_data):
         # single update
@@ -80,6 +92,12 @@ class ProductVariationSerializer(serializers.ModelSerializer):
     currency_id = serializers.UUIDField(read_only=True, source="currency")
     name = serializers.CharField(read_only=True)
     product_id = serializers.UUIDField(read_only=True, source="product")
+    # Written to the default pricelist rather than to the variation itself.
+    selling_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, write_only=True
+    )
+    # Read back from whichever pricelist applies.
+    price = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductVariation
@@ -88,6 +106,8 @@ class ProductVariationSerializer(serializers.ModelSerializer):
             "name",
             "sku",
             "cost_price",
+            "selling_price",
+            "price",
             "uom",
             "uom_id",
             "currency",
@@ -105,6 +125,11 @@ class ProductVariationSerializer(serializers.ModelSerializer):
             "product_id",
         )
         read_only_fields = ("organization", "uom", "currency")
+
+    def get_price(self, obj):
+        """The variation's price on the organization's default pricelist."""
+        pricelist = get_default_pricelist(obj.organization)
+        return get_price(pricelist, obj) if pricelist is not None else None
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -142,7 +167,11 @@ class ProductImageWritableSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, required=False)
     category = CategorySerializer(read_only=True)
-    variations = ProductVariationSerializer(many=True, required=True)
+    # A product is not sellable without at least one priced variation, so an
+    # empty list is refused rather than creating an unsellable product.
+    variations = ProductVariationSerializer(
+        many=True, required=True, allow_empty=False
+    )
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all(),
         source="category",
@@ -159,7 +188,6 @@ class ProductSerializer(serializers.ModelSerializer):
             "images",
             "description",
             "category",
-            "price",
             "category_id",
             "is_active",
             "created_at",
@@ -181,10 +209,24 @@ class ProductSerializer(serializers.ModelSerializer):
         # Create the product first
         product = Product.objects.create(**validated_data)
 
-        # Create the variations
+        # Prices land on the default pricelist, so it has to exist. Refusing here
+        # is the same rule sales apply: without a pricelist, nothing can trade.
+        try:
+            pricelist = require_default_pricelist(product.organization)
+        except PricelistUnavailable as exc:
+            raise serializers.ValidationError({"variations": str(exc)}) from exc
+
+        # Create the variations, recording each price on the pricelist
         for variation_data in variations_data:
-            ProductVariation.objects.create(
+            selling_price = variation_data.pop("selling_price")
+            variation = ProductVariation.objects.create(
                 product=product, organization=product.organization, **variation_data
+            )
+            set_price(
+                organization=product.organization,
+                pricelist=pricelist,
+                product_variation=variation,
+                price=selling_price,
             )
 
         # Create images
@@ -210,22 +252,24 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ProductVariationWithPriceSerializer(ProductVariationSerializer):
-    price = serializers.SerializerMethodField()
+    """Resolves price against an explicitly requested list, not the default."""
 
     class Meta(ProductVariationSerializer.Meta):
-        fields = ProductVariationSerializer.Meta.fields + ("price",)
+        pass
 
     def get_price(self, obj):
         pricelist_id = self.context.get("pricelist_id")
-        if pricelist_id:
-            try:
-                pricelist_item = PricelistItem.objects.get(
-                    product_variation=obj, pricelist_id=pricelist_id
-                )
-                return pricelist_item.price
-            except PricelistItem.DoesNotExist:
-                return None
-        return None
+        if not pricelist_id:
+            return None
+
+        pricelist_item = PricelistItem.objects.filter(
+            product_variation=obj,
+            pricelist_id=pricelist_id,
+            # pricelist_id is client-supplied, so scope it to the variation's
+            # tenant rather than trusting it to name a pricelist we own.
+            organization_id=obj.organization_id,
+        ).first()
+        return pricelist_item.price if pricelist_item is not None else None
 
 
 class ProductWithPriceSerializer(ProductSerializer):

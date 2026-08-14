@@ -1,29 +1,8 @@
 import uuid
 from django.db import models
-from organization.models import Organization
+from organization.models import OrganizationBaseModel
 from users.models import CustomUser
 from products.models import Product, Category, ProductVariation
-
-class OrganizationBaseModel(models.Model):
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-
-    class Meta:
-        abstract = True
-
-class AgentInventoryItem(OrganizationBaseModel):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    agent = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='inventory_items')
-    product_variation = models.ForeignKey(ProductVariation, on_delete=models.CASCADE, related_name='agent_inventory')
-    quantity = models.PositiveIntegerField(default=0)
-    last_updated = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = ('agent', 'product_variation')
-        verbose_name = "Agent Inventory Item"
-        verbose_name_plural = "Agent Inventory Items"
-
-    def __str__(self):
-        return f"{self.quantity} x {self.product_variation.name} for {self.agent.username}"
 
 class Location(OrganizationBaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -34,6 +13,9 @@ class Location(OrganizationBaseModel):
     contact_person = models.CharField(max_length=255, blank=True)
     contact_phone = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
+    # Multi-branch is out of MVP scope, so each organization gets exactly one
+    # default location that the sale flow moves stock out of.
+    is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -56,6 +38,15 @@ class InventoryItem(OrganizationBaseModel):
         return f'{self.product_variation.name} at {self.location.name}'
 
 class StockMovement(OrganizationBaseModel):
+    """Append-only stock ledger. This is the source of truth for stock levels.
+
+    `quantity` is signed: negative for stock leaving (SALE, PICK, STOCK_OUT),
+    positive for stock arriving (STOCK_IN, UNPICK, returns). Current stock for a
+    variation is therefore SUM(quantity), and InventoryItem.available_quantity is
+    only a cache of that sum. Never write rows here directly — go through
+    inventory.services.record_movement so the cache stays consistent.
+    """
+
     MOVEMENT_TYPES = (
         ('STOCK_IN', 'Stock In'),
         ('STOCK_OUT', 'Stock Out'),

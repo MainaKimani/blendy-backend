@@ -11,3 +11,4 @@ class PricelistItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PricelistItem
         fields = '__all__'
+        read_only_fields = ('organization',)

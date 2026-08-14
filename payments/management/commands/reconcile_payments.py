@@ -23,10 +23,14 @@ class Command(BaseCommand):
             if payment.retry_count >= payment.max_retries:
                 payment.status = Payment.StatusChoices.CANCELLED
                 payment.failure_reason = payment.failure_reason or "Retry limit reached"
-                payment.sale.payment_status = "CANCELLED"
                 payment.reconciliation_status = Payment.ReconciliationStatus.MISMATCH
                 payment.reconciled_at = now
-                payment.sale.save(update_fields=["payment_status"])
+                # Exhausting STK retries cancels the payment attempt, not the
+                # sale: the customer may still pay the Till directly, so the
+                # sale stays open for reconciliation (MVP §8, US-9b).
+                if payment.sale.payment_status not in ("PAID", "REFUNDED"):
+                    payment.sale.payment_status = "AWAITING_DIRECT_PAYMENT"
+                    payment.sale.save(update_fields=["payment_status"])
                 payment.save(update_fields=["status", "failure_reason", "reconciliation_status", "reconciled_at", "updated_at"])
                 exhausted += 1
                 continue

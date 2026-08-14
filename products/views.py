@@ -1,7 +1,15 @@
+from django.db import transaction
+from django.db.models import Min
 from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from pricing.services import (
+    PricelistUnavailable,
+    require_default_pricelist,
+    set_price,
+)
 from users.permissions import IsOrganizationUser, HasUserPermission
 from .models import Product, ProductImage, Category, ProductVariation, Currency, UOM
 from .serializers import (
@@ -75,6 +83,13 @@ class ProductViewSet(OrganizationBaseViewSet):
 
     ordering = ["-created_at"]
 
+    def get_queryset(self):
+        # Product no longer holds a price, so ordering by it is served from the
+        # cheapest priced variation on any of the organization's pricelists.
+        return super().get_queryset().annotate(
+            price=Min("variations__pricelist_items__price")
+        )
+
     def get_permissions(self):
         if self.action == "list" or self.action == "retrieve":
             return [
@@ -147,17 +162,34 @@ class ProductVariationViewSet(OrganizationBaseViewSet):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    # Inject organization automatically
+    # Inject organization automatically, and record each price on the pricelist
+    @transaction.atomic
     def perform_create(self, serializer):
-        if isinstance(serializer.validated_data, list):
-            # bulk create
-            instances = [
-                ProductVariation(organization=self.request.user.organization, **item)
-                for item in serializer.validated_data
-            ]
-            ProductVariation.objects.bulk_create(instances)
-        else:
-            serializer.save(organization=self.request.user.organization)
+        organization = self.request.user.organization
+        try:
+            pricelist = require_default_pricelist(organization)
+        except PricelistUnavailable as exc:
+            raise ValidationError({"selling_price": str(exc)})
+
+        payload = serializer.validated_data
+        rows = payload if isinstance(payload, list) else [payload]
+
+        created = []
+        for item in rows:
+            # The selling price belongs on the pricelist, not the variation.
+            selling_price = item.pop("selling_price")
+            variation = ProductVariation.objects.create(
+                organization=organization, **item
+            )
+            set_price(
+                organization=organization,
+                pricelist=pricelist,
+                product_variation=variation,
+                price=selling_price,
+            )
+            created.append(variation)
+
+        serializer.instance = created if isinstance(payload, list) else created[0]
 
     # def get_permissions(self):
     #     if self.action == "list" or self.action == "retrieve":

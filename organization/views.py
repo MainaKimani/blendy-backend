@@ -12,6 +12,7 @@ from users.permissions import (
     IsSuperAdminOrOrgAdmin,
 )
 from users.serializers import CustomUserSerializer
+from pricing.services import create_default_pricelist
 
 
 class OnboardOrganizationView(APIView):
@@ -38,6 +39,12 @@ class OnboardOrganizationView(APIView):
 class OrganizationViewSet(viewsets.ModelViewSet):
     queryset = Organization.objects.all()
     serializer_class = OrganizationSerializer
+
+    def perform_create(self, serializer):
+        # An organization created here needs a pricelist just as much as one
+        # created through onboarding, or it cannot sell anything.
+        organization = serializer.save()
+        create_default_pricelist(organization)
 
     def get_permissions(self):
         if self.action == "list" or self.action == "retrieve":

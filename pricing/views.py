@@ -1,7 +1,7 @@
-from rest_framework import viewsets
 from .models import Pricelist, PricelistItem
 from .serializers import PricelistSerializer, PricelistItemSerializer
 from inventory.views import OrganizationBaseViewSet
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from users.permissions import IsOrganizationUser, HasUserPermission
 
@@ -20,9 +20,20 @@ class PricelistViewSet(OrganizationBaseViewSet):
             return [IsAuthenticated(), IsOrganizationUser(), HasUserPermission('pricing.delete_pricelist')]
         return [IsAuthenticated(), IsOrganizationUser()]
 
-class PricelistItemViewSet(viewsets.ModelViewSet):
+class PricelistItemViewSet(OrganizationBaseViewSet):
     queryset = PricelistItem.objects.all()
     serializer_class = PricelistItemSerializer
+
+    def perform_create(self, serializer):
+        organization = self.get_tenant()
+        if organization is None:
+            raise PermissionDenied(
+                "A valid X-Organization header is required to create this resource."
+            )
+        if serializer.validated_data["pricelist"].organization_id != organization.id:
+            # Without this the pricelist FK is an unguarded cross-tenant handle.
+            raise PermissionDenied("Pricelist does not belong to this organization.")
+        serializer.save(organization=organization)
 
     def get_permissions(self):
         if self.action == 'list' or self.action == 'retrieve':

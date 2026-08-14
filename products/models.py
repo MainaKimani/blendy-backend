@@ -5,14 +5,8 @@ from django.core.files.base import ContentFile
 from django.db import models
 from PIL import Image
 
-from organization.models import Organization
+from organization.models import OrganizationBaseModel
 from users.models import CustomUser
-
-class OrganizationBaseModel(models.Model):
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-
-    class Meta:
-        abstract = True
 
 
 class Category(OrganizationBaseModel):
@@ -36,7 +30,8 @@ class Product(OrganizationBaseModel):
     category = models.ForeignKey(
         Category, on_delete=models.SET_NULL, null=True, blank=True
     )
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # A product carries no price: the pricelist is authoritative, and prices are
+    # held per variation on PricelistItem.
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

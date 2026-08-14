@@ -14,8 +14,19 @@ class NumberInFilter(filters.BaseInFilter, filters.NumberFilter):
 class ProductFilter(filters.FilterSet):
     # 'gte' = Greater than or equal to
     # 'lte' = Less than or equal to
-    min_price = filters.NumberFilter(field_name="price", lookup_expr="gte")
-    max_price = filters.NumberFilter(field_name="price", lookup_expr="lte")
+    # Price lives on the pricelist now, so filter across the product's priced
+    # variations. distinct() because a product with several priced variations
+    # would otherwise be returned once per match.
+    min_price = filters.NumberFilter(
+        field_name="variations__pricelist_items__price",
+        lookup_expr="gte",
+        distinct=True,
+    )
+    max_price = filters.NumberFilter(
+        field_name="variations__pricelist_items__price",
+        lookup_expr="lte",
+        distinct=True,
+    )
 
     # Filter by a list of IDs: ?category_ids=1,2,3
     categories = CharInFilter(field_name="category__id", lookup_expr="in")

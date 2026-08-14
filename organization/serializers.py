@@ -4,6 +4,7 @@ from .models import Organization
 from users.models import CustomUser
 from users.serializers import CustomUserSerializer
 from authorization.models import Role, OrganizationRole, UserRoleAssignment
+from pricing.services import create_default_pricelist
 
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,6 +23,10 @@ class OnboardOrganizationSerializer(serializers.Serializer):
         with transaction.atomic():
             # Create the organization
             organization = Organization.objects.create(**org_data)
+
+            # Sales are priced from the default pricelist, so an organization
+            # without one cannot trade at all. Create it up front.
+            create_default_pricelist(organization)
 
             # Create the user and assign them to the organization
             user_data['organization'] = organization
