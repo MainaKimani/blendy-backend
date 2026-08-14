@@ -17,6 +17,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-cdtpzpu4fj_sl*551t@rj(&$p+p@o7ra9jgj2f1ekdk-hy6k(w"
 
+PAYMENTS_MPESA_WEBHOOK_SECRET = os.getenv("PAYMENTS_MPESA_WEBHOOK_SECRET", "secret-webhook-key")
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -47,6 +49,7 @@ INSTALLED_APPS = [
     "products",
     "sales",
     "pricing",
+    "payments",
 ]
 
 # CORS_ALLOWED_ORIGINS = [
