@@ -1,11 +1,9 @@
 from rest_framework import serializers
 from django.db import transaction
 from .models import Product, Category, ProductImage, ProductVariation, Currency, UOM
-from pricing.models import PricelistItem
 from pricing.services import (
     PricelistUnavailable,
     get_default_pricelist,
-    get_price,
     require_default_pricelist,
     set_price,
 )
@@ -87,11 +85,15 @@ class ProductVariationWriteSerializer(serializers.ModelSerializer):
 
 class ProductVariationSerializer(serializers.ModelSerializer):
     uom = UOMSerializer(read_only=True)
-    uom_id = serializers.UUIDField(read_only=True, source="uom")
+    # These read the *_id columns directly. They used to point at the related
+    # objects (source="uom" and so on), and since UUIDField renders with str(),
+    # each one returned the object's __str__ — a name, never an id. They also
+    # cost a foreign-key fetch per row to produce that wrong value.
+    uom_id = serializers.UUIDField(read_only=True)
     currency = CurrencySerializer(read_only=True)
-    currency_id = serializers.UUIDField(read_only=True, source="currency")
+    currency_id = serializers.UUIDField(read_only=True)
     name = serializers.CharField(read_only=True)
-    product_id = serializers.UUIDField(read_only=True, source="product")
+    product_id = serializers.UUIDField(read_only=True)
     # Written to the default pricelist rather than to the variation itself.
     selling_price = serializers.DecimalField(
         max_digits=10, decimal_places=2, write_only=True
@@ -126,10 +128,33 @@ class ProductVariationSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("organization", "uom", "currency")
 
+    def _default_pricelist(self, obj):
+        """The tenant's default pricelist, resolved once for the whole response.
+
+        Cached on the serializer context, which DRF shares with the root
+        serializer, so a listing of 200 variations resolves it once rather than
+        200 times. Keyed by tenant because a response may legitimately span more
+        than one (a superadmin listing, for instance).
+        """
+        cache = self.context.setdefault("_default_pricelists", {})
+        organization_id = obj.organization_id
+        if organization_id not in cache:
+            # By id, not by object: obj.organization is a foreign-key fetch.
+            cache[organization_id] = get_default_pricelist(organization_id)
+        return cache[organization_id]
+
     def get_price(self, obj):
         """The variation's price on the organization's default pricelist."""
-        pricelist = get_default_pricelist(obj.organization)
-        return get_price(pricelist, obj) if pricelist is not None else None
+        pricelist = self._default_pricelist(obj)
+        if pricelist is None:
+            return None
+        # Read from `pricelist_items`, which the viewsets prefetch. Filtering in
+        # Python keeps this free when prefetched, and costs the same single
+        # query it always did when it is not.
+        for item in obj.pricelist_items.all():
+            if item.pricelist_id == pricelist.id:
+                return item.price
+        return None
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -237,18 +262,22 @@ class ProductSerializer(serializers.ModelSerializer):
 
         return product
 
+    # The three methods below deliberately iterate in Python rather than calling
+    # .values_list() or .filter() on the related manager. Both of those bypass
+    # the prefetch cache and issue fresh SQL, so with them the viewset's
+    # prefetch_related bought nothing and each product cost three extra queries.
+
     def get_available_sizes(self, obj):
-        return obj.variations.values_list("size", flat=True)
+        return [variation.size for variation in obj.variations.all()]
 
     def get_primary_image(self, obj):
-        primary_image = obj.images.filter(is_primary=True).first()
-        if primary_image:
-            return primary_image.image.url
+        for image in obj.images.all():
+            if image.is_primary:
+                return image.image.url
         return None
 
     def get_other_images(self, obj):
-        other_images = obj.images.filter(is_primary=False)
-        return [image.image.url for image in other_images]
+        return [image.image.url for image in obj.images.all() if not image.is_primary]
 
 
 class ProductVariationWithPriceSerializer(ProductVariationSerializer):
@@ -262,14 +291,15 @@ class ProductVariationWithPriceSerializer(ProductVariationSerializer):
         if not pricelist_id:
             return None
 
-        pricelist_item = PricelistItem.objects.filter(
-            product_variation=obj,
-            pricelist_id=pricelist_id,
+        for item in obj.pricelist_items.all():
             # pricelist_id is client-supplied, so scope it to the variation's
             # tenant rather than trusting it to name a pricelist we own.
-            organization_id=obj.organization_id,
-        ).first()
-        return pricelist_item.price if pricelist_item is not None else None
+            if (
+                str(item.pricelist_id) == str(pricelist_id)
+                and item.organization_id == obj.organization_id
+            ):
+                return item.price
+        return None
 
 
 class ProductWithPriceSerializer(ProductSerializer):

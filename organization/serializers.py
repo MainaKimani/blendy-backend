@@ -4,6 +4,7 @@ from .models import Organization
 from users.models import CustomUser
 from users.serializers import CustomUserSerializer
 from authorization.models import Role, OrganizationRole, UserRoleAssignment
+from authorization.rbac import DEFAULT_ORGANIZATION_ROLES, ORG_ADMIN, ROLES
 from pricing.services import create_default_pricelist
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -32,15 +33,21 @@ class OnboardOrganizationSerializer(serializers.Serializer):
             user_data['organization'] = organization
             user = CustomUser.objects.create_user(**user_data)
 
-            # Assign the ORG_ADMIN role to the newly created user
-            # Ensure a global 'ORG_ADMIN' role exists
-            org_admin_role, created = Role.objects.get_or_create(name='ORG_ADMIN', defaults={'description': 'Organization Administrator'})
-            
-            # Link the global ORG_ADMIN role to the new organization
-            organization_admin_role, created = OrganizationRole.objects.get_or_create(
-                organization=organization,
-                role=org_admin_role
-            )
+            # Enable the built-in roles for this shop. ORG_ADMIN is what the
+            # owner gets; CASHIER is enabled alongside it so the owner can hire
+            # staff straight away rather than having to enable the role first.
+            # The roles and their permissions are seeded by authorization.rbac.
+            organization_roles = {}
+            for role_name in DEFAULT_ORGANIZATION_ROLES:
+                role, _ = Role.objects.get_or_create(
+                    name=role_name,
+                    defaults={'description': ROLES[role_name]['description']},
+                )
+                organization_roles[role_name], _ = OrganizationRole.objects.get_or_create(
+                    organization=organization, role=role
+                )
+
+            organization_admin_role = organization_roles[ORG_ADMIN]
             
             # Assign the user to this organization-specific admin role
             UserRoleAssignment.objects.create(user=user, organization_role=organization_admin_role)

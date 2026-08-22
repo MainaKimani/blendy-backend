@@ -19,7 +19,8 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
-from drf_yasg import openapi
+
+from blendy_backend.schema import API_INFO
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
@@ -28,37 +29,14 @@ from rest_framework_simplejwt.views import (
 from django.conf import settings
 from django.conf.urls.static import static
 
+# Security definitions and the tenancy header come from SWAGGER_SETTINGS and
+# BlendySchemaGenerator. They used to be assigned onto schema_view here, which
+# had no effect: drf-yasg reads neither attribute off the view.
 schema_view = get_schema_view(
-    openapi.Info(
-        title="Blendy API",
-        default_version="v1",
-        description="API documentation for the Blendy project",
-        terms_of_service="https://www.google.com/policies/terms/",
-        contact=openapi.Contact(email="contact@blendy.local"),
-        license=openapi.License(name="BSD License"),
-    ),
+    API_INFO,
     public=True,
     permission_classes=(permissions.AllowAny,),
 )
-
-schema_view.security_definitions = {
-    "Bearer": {
-        "type": "apiKey",
-        "name": "Authorization",
-        "in": "header",
-        "description": "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\""
-    },
-    "X-Organization": {
-        "type": "apiKey",
-        "name": "X-Organization",
-        "in": "header",
-        "description": "Organization ID for multi-tenancy. Example: \"X-Organization: your_organization_id\""
-    }
-}
-schema_view.security = [
-    {"Bearer": []},
-    {"X-Organization": []}
-]
 
 urlpatterns = [
     path("admin/", admin.site.urls),

@@ -56,6 +56,36 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     
 
+    def get_permission_names(self):
+        """Every permission granted to this user within their organization.
+
+        Resolved in a single query. The previous implementation walked the role
+        assignments in Python at three queries each, and returned early on a
+        match — so its cost depended on role ordering, and the worst case was a
+        permission the user did *not* hold, which is exactly the path a denied
+        request takes.
+
+        Deliberately not cached here: a permission set cached on the user object
+        outlives the request whenever that object is reused, and would then hand
+        back access that has since been revoked. HasUserPermission caches it on
+        the request instead, where it cannot go stale.
+        """
+        if not self.organization_id:
+            names = frozenset()
+        else:
+            names = frozenset(
+                name
+                for name in self.role_assignments.filter(
+                    organization_role__organization_id=self.organization_id
+                ).values_list(
+                    'organization_role__role__permissions__name', flat=True
+                )
+                # A role with no permissions attached yields a null here.
+                if name is not None
+            )
+
+        return names
+
     def has_perm(self, perm, obj=None):
         """Does the user have a specific permission?"""
         if self.is_superuser: # Django's built-in superuser has all permissions
@@ -63,13 +93,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         if self.is_superuser_admin: # Our custom super admin has all permissions
             return True
 
-        # Check permissions through assigned roles
-        if self.organization and hasattr(self, 'role_assignments'):
-            for assignment in self.role_assignments.filter(organization_role__organization=self.organization):
-                for permission in assignment.organization_role.role.permissions.all():
-                    if permission.name == perm:
-                        return True
-        return False
+        return perm in self.get_permission_names()
 
     def has_module_perms(self, app_label):
         """Does the user have permissions to view the app `app_label`?"""

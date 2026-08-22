@@ -18,7 +18,7 @@ from inventory.services import (
     record_movement,
 )
 from inventory.views import InventoryItemViewSet
-from blendy_backend.testing import make_organization, make_priced_variation
+from blendy_backend.testing import grant_role, make_organization, make_priced_variation
 from organization.models import Organization
 from products.models import Product, ProductVariation
 from users.models import CustomUser
@@ -69,6 +69,14 @@ class TenantScopedSerializerTests(APITestCase):
         self.variation = make_priced_variation(
             self.org, "Salt", Decimal("50.00")
         )
+        # These endpoints now require a permission, so the caller needs a role.
+        # The assertion is still about the body, not about who is calling.
+        self.user = CustomUser.objects.create_user(
+            email="owner@shop.test", username="owner", password="pw",
+            organization=self.org,
+        )
+        grant_role(self.user, self.org)
+        self.client.force_authenticate(user=self.user)
 
     def _post(self, url, payload):
         return self.client.post(
@@ -169,6 +177,7 @@ class StockWriteEndpointTests(APITestCase):
             email="owner@shop.test", username="owner", password="pw",
             organization=self.org,
         )
+        grant_role(self.user, self.org)
         self.variation = make_priced_variation(
             self.org, "Sugar", Decimal("150.00")
         )
@@ -384,6 +393,7 @@ class LowStockAlertTests(APITestCase):
             email="owner@shop.test", username="owner", password="pw",
             organization=self.org,
         )
+        grant_role(self.user, self.org)
 
     def _variation(self, organization, name, reorder_level=None, stock=0):
         variation = make_priced_variation(

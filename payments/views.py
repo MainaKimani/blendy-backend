@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -36,8 +38,79 @@ from .services.webhooks.security import (
 from .services.webhooks.signature import InvalidWebhookSignature, verify_mpesa_signature
 
 
+STK_CALLBACK_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    description="Safaricom's STK push result callback, forwarded verbatim.",
+    properties={
+        "Body": openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "stkCallback": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    required=["MerchantRequestID", "CheckoutRequestID", "ResultCode"],
+                    properties={
+                        "MerchantRequestID": openapi.Schema(type=openapi.TYPE_STRING),
+                        "CheckoutRequestID": openapi.Schema(type=openapi.TYPE_STRING),
+                        "ResultCode": openapi.Schema(
+                            type=openapi.TYPE_INTEGER,
+                            description="0 means success. Anything else fails the payment and moves the sale to AWAITING_DIRECT_PAYMENT.",
+                        ),
+                        "ResultDesc": openapi.Schema(type=openapi.TYPE_STRING),
+                        "CallbackMetadata": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="Present on success only.",
+                            properties={
+                                "Item": openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(
+                                        type=openapi.TYPE_OBJECT,
+                                        properties={
+                                            "Name": openapi.Schema(type=openapi.TYPE_STRING),
+                                            "Value": openapi.Schema(type=openapi.TYPE_STRING),
+                                        },
+                                    ),
+                                    description="Flattened by name: Amount, MpesaReceiptNumber, TransactionDate, PhoneNumber.",
+                                ),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+    },
+)
+
+C2B_CONFIRMATION_SCHEMA = openapi.Schema(
+    type=openapi.TYPE_OBJECT,
+    description="Safaricom's C2B confirmation for a direct Till payment.",
+    required=["TransID"],
+    properties={
+        "TransID": openapi.Schema(
+            type=openapi.TYPE_STRING,
+            description="The M-Pesa receipt. Reconciliation is idempotent on this.",
+        ),
+        "TransAmount": openapi.Schema(type=openapi.TYPE_STRING),
+        "MSISDN": openapi.Schema(
+            type=openapi.TYPE_STRING, description="The payer's phone number."
+        ),
+        "BusinessShortCode": openapi.Schema(
+            type=openapi.TYPE_STRING,
+            description="Matched against Organization.mpesa_shortcode to attribute the payment.",
+        ),
+        "TransTime": openapi.Schema(
+            type=openapi.TYPE_STRING, description="yyyyMMddHHmmss, East Africa Time."
+        ),
+        "TransactionType": openapi.Schema(type=openapi.TYPE_STRING),
+    },
+)
+
+
 class PaymentViewSet(OrganizationBaseViewSet):
-    queryset = Payment.objects.select_related("sale")
+    # `transactions` is nested on every payment, so it is prefetched rather than
+    # queried once per row.
+    queryset = Payment.objects.select_related("sale").prefetch_related(
+        "transactions"
+    )
     serializer_class = PaymentSerializer
 
     def get_permissions(self):
@@ -91,6 +164,16 @@ class PaymentViewSet(OrganizationBaseViewSet):
             idempotency_key=idempotency_key,
         )
 
+    @swagger_auto_schema(
+        operation_summary="Direct payments that could not be matched",
+        operation_description=(
+            "Money that arrived at the Till but could not be tied to an open "
+            "sale — no candidate, or more than one. Each carries a "
+            "`reconciliation_note` saying which. Nothing is dropped; these wait "
+            "for an owner to reconcile by hand (US-10)."
+        ),
+        responses={200: MpesaTransactionSerializer(many=True)},
+    )
     @action(detail=False, methods=["get"], url_path="unmatched")
     def unmatched(self, request):
         """Direct payments that arrived but could not be matched (US-10).
@@ -114,6 +197,16 @@ class PaymentViewSet(OrganizationBaseViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @swagger_auto_schema(
+        operation_summary="Set a payment's status by hand",
+        operation_description=(
+            "Moves the payment and its sale together: SUCCEEDED marks the sale "
+            "PAID and stamps paid_at, REFUNDED/FAILED/CANCELLED set the "
+            "matching sale status."
+        ),
+        request_body=PaymentStatusUpdateSerializer,
+        responses={200: PaymentSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="update-status")
     @transaction.atomic
     def update_status(self, request, pk=None):
@@ -129,6 +222,27 @@ class MpesaWebhookView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    @swagger_auto_schema(
+        operation_summary="M-Pesa STK push callback",
+        operation_description=(
+            "Called by Safaricom, not by your clients. Safaricom does not sign "
+            "callbacks, so the trust boundary is the secret `token` in the URL "
+            "plus a source-IP allowlist; the token must match "
+            "`MPESA_WEBHOOK_TOKEN` and the callback URL registered with Daraja."
+            "\n\nA success callback whose amount does not match the payment is "
+            "never marked paid — it is flagged MISMATCH for review. A failure "
+            "moves the sale to AWAITING_DIRECT_PAYMENT rather than closing it, "
+            "so the customer can still pay the Till directly."
+        ),
+        request_body=STK_CALLBACK_SCHEMA,
+        responses={
+            200: "Processed.",
+            400: "Malformed payload. Returned rather than a 500 so Safaricom stops retrying.",
+            401: "Bad token or disallowed source IP.",
+            404: "No payment matches the CheckoutRequestID/MerchantRequestID pair.",
+        },
+        security=[],
+    )
     @transaction.atomic
     def post(self, request, token="", *args, **kwargs):
         # Safaricom does not sign callbacks, so the trust boundary is the secret
@@ -271,6 +385,26 @@ class MpesaC2BConfirmationView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    @swagger_auto_schema(
+        operation_summary="M-Pesa C2B confirmation (direct Till payment)",
+        operation_description=(
+            "Called by Safaricom for money paid straight to the Till, which "
+            "carries no CheckoutRequestID. The payment is attributed to a tenant "
+            "by shortcode, then matched to an open sale by payer phone number "
+            "and amount within a 24-hour window. An ambiguous match — zero "
+            "candidates or more than one — is queued on "
+            "`/payments/payments/unmatched/` rather than guessed at.\n\n"
+            "Always answers 200 in Safaricom's expected shape, including when "
+            "nothing could be matched, so it stops retrying."
+        ),
+        request_body=C2B_CONFIRMATION_SCHEMA,
+        responses={
+            200: "Acknowledged. `matched` says whether it landed on a sale.",
+            400: "TransID missing.",
+            401: "Bad token or disallowed source IP.",
+        },
+        security=[],
+    )
     @transaction.atomic
     def post(self, request, token="", *args, **kwargs):
         try:

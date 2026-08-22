@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 
 from inventory.models import InventoryItem, StockMovement
 from inventory.services import get_default_location, ledger_balance, record_movement
-from blendy_backend.testing import make_organization, make_priced_variation
+from blendy_backend.testing import grant_role, make_organization, make_priced_variation
 from organization.models import Organization
 from products.models import Product, ProductVariation
 from sales.models import Sale, SaleItem
@@ -37,6 +37,7 @@ class SaleTenantIsolationTests(APITestCase, SaleTestData):
         self.user_a = CustomUser.objects.create_user(
             email="a@shop.test", username="a", password="pw", organization=self.org_a
         )
+        grant_role(self.user_a, self.org_a)
 
         self.variation_a = self.make_variation(
             self.org_a, "Sugar", Decimal("150.00"), stock=10
@@ -177,6 +178,7 @@ class SalePriceValidationTests(APITestCase, SaleTestData):
             email="till@shop.test", username="till", password="pw",
             organization=self.org,
         )
+        grant_role(self.staff, self.org)
         # Catalogue price is 150.00.
         self.variation = self.make_variation(
             self.org, "Sugar", Decimal("150.00"), stock=50
@@ -309,6 +311,7 @@ class SaleStockLedgerTests(APITestCase, SaleTestData):
             email="owner@shop.test", username="owner", password="pw",
             organization=self.org,
         )
+        grant_role(self.user, self.org)
         self.variation = self.make_variation(
             self.org, "Maize Flour", Decimal("120.00"), stock=10
         )

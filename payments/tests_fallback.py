@@ -9,7 +9,7 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from blendy_backend.testing import make_organization, make_priced_variation
+from blendy_backend.testing import grant_role, make_organization, make_priced_variation
 from organization.models import Organization
 from payments.models import MpesaTransaction, Payment
 from products.models import Product, ProductVariation
@@ -320,6 +320,7 @@ class PendingPaymentQueueTests(APITestCase, FallbackTestData):
         self.user = CustomUser.objects.create_user(
             email="o@shop.test", username="o", password="pw", organization=self.org
         )
+        grant_role(self.user, self.org)
         self.sale = self.make_sale(
             self.org, "0700999999", Decimal("1000.00"), "AWAITING_DIRECT_PAYMENT"
         )
@@ -425,6 +426,7 @@ class AnonymousStkPushThrottleTests(APITestCase, FallbackTestData):
             email="till@shop.test", username="till", password="pw",
             organization=self.org,
         )
+        grant_role(user, self.org)
         self.client.force_authenticate(user=user)
 
         for _ in range(4):

@@ -128,3 +128,18 @@ class StockAdjustmentSerializer(serializers.Serializer):
                 {"quantity": "A stock adjustment cannot be zero."}
             )
         return attrs
+
+
+class StockWriteResponseSerializer(serializers.Serializer):
+    """The shape returned by the restock and adjust endpoints.
+
+    Documentation only — these endpoints build their response by hand, and this
+    is what they build. `movement` is null when a physical count matched the
+    recorded figure, since nothing moved and nothing was written to the ledger.
+    """
+
+    movement = StockMovementSerializer(allow_null=True)
+    product_variation = serializers.UUIDField()
+    available_quantity = serializers.IntegerField(
+        help_text="The balance derived from the ledger itself, not the cache."
+    )

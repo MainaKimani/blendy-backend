@@ -48,6 +48,9 @@ def create_default_pricelist(organization):
 def get_default_pricelist(organization):
     """Return the organization's default pricelist, or None if it has none.
 
+    `organization` may be an Organization or just its id. Passing the id is
+    preferred when serializing, since it avoids a foreign-key fetch per row.
+
     Deliberately does not create one on demand: a missing pricelist should stop
     a sale and be fixed by an owner, not be papered over mid-transaction.
     """
@@ -79,6 +82,19 @@ def require_price(pricelist, product_variation):
     if price is None:
         raise VariationNotPriced(product_variation, pricelist)
     return price
+
+
+def get_prices(pricelist, product_variations):
+    """Prices for several variations on one list, keyed by variation id.
+
+    One query for the whole basket. Resolving a sale line at a time cost a query
+    per line, which is the same lookup repeated against the same list.
+    """
+    return dict(
+        PricelistItem.objects.filter(
+            pricelist=pricelist, product_variation__in=product_variations
+        ).values_list("product_variation_id", "price")
+    )
 
 
 def set_price(*, organization, pricelist, product_variation, price):

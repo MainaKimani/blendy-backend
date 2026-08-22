@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from .models import CustomUser
 from .serializers import CustomUserSerializer
 from authorization.models import Role, OrganizationRole, UserRoleAssignment
+from authorization.rbac import VIEWER
 from django.db import transaction
 from users.permissions import IsOrganizationUser, IsSuperAdminOrOrgAdmin, HasUserPermission
 
@@ -110,19 +111,26 @@ class RegisterView(APIView):
 
             user = serializer.save(organization=organization)
 
-            # Assign a default role (e.g., 'Viewer') to newly registered users
-            # You would need to ensure a 'Viewer' role exists globally and is linked to the organization
-            try:
-                default_role = Role.objects.get(
-                    name="Viewer"
-                )  # Assuming a global 'Viewer' role exists
-                org_role, created = OrganizationRole.objects.get_or_create(
-                    organization=organization, role=default_role
+            # Give the new account the VIEWER role, which is seeded by
+            # authorization.rbac and enabled for every organization.
+            #
+            # This looked up the literal name "Viewer" and swallowed
+            # Role.DoesNotExist, so for as long as nothing seeded roles it
+            # silently assigned nothing and every self-registered user ended up
+            # with no role at all. Referencing the constant means a rename in
+            # the catalogue cannot quietly break it again.
+            #
+            # VIEWER is scoped for this path specifically: registration is open
+            # to anonymous callers and needs only an organization id, so the
+            # role holds catalogue reads and nothing else.
+            viewer_role = Role.objects.filter(name=VIEWER).first()
+            if viewer_role is not None:
+                org_role, _ = OrganizationRole.objects.get_or_create(
+                    organization=organization, role=viewer_role
                 )
-                UserRoleAssignment.objects.create(user=user, organization_role=org_role)
-            except Role.DoesNotExist:
-                # Handle case where default role doesn't exist
-                pass  # Or raise an error, depending on your policy
+                UserRoleAssignment.objects.get_or_create(
+                    user=user, organization_role=org_role
+                )
 
             return Response(
                 CustomUserSerializer(user).data, status=status.HTTP_201_CREATED

@@ -1,3 +1,5 @@
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,6 +25,30 @@ class OnboardOrganizationView(APIView):
 
     permission_classes = [IsAuthenticated, IsSuperAdminUser]
 
+    @swagger_auto_schema(
+        operation_summary="Create an organization and its first admin",
+        operation_description=(
+            "Creates the organization, its `Default Pricelist` — without which "
+            "it cannot price or sell anything — and its ORG_ADMIN user, in one "
+            "transaction. The returned organization id is what callers then send "
+            "as the `X-Organization` header."
+        ),
+        request_body=OnboardOrganizationSerializer,
+        responses={
+            201: openapi.Response(
+                "Created.",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "organization": openapi.Schema(type=openapi.TYPE_OBJECT),
+                        "user": openapi.Schema(type=openapi.TYPE_OBJECT),
+                    },
+                ),
+            ),
+            400: "Validation error.",
+            403: "Caller is not a superadmin.",
+        },
+    )
     def post(self, request, *args, **kwargs):
         serializer = OnboardOrganizationSerializer(data=request.data)
         if serializer.is_valid():

@@ -127,6 +127,27 @@ REST_FRAMEWORK = {
 }
 
 
+# The published schema, and the Swagger UI it drives. Basic auth is drf-yasg's
+# default and is not what this API uses; the tenancy header is added per
+# operation by the generator, since no view declares it.
+SWAGGER_SETTINGS = {
+    "DEFAULT_GENERATOR_CLASS": "blendy_backend.schema.BlendySchemaGenerator",
+    "DEFAULT_INFO": "blendy_backend.schema.API_INFO",
+    "USE_SESSION_AUTH": False,
+    "SECURITY_DEFINITIONS": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": (
+                'JWT access token, as returned by /api/auth/login/. '
+                'Send it as: Authorization: Bearer <token>'
+            ),
+        },
+    },
+}
+
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",

@@ -2,23 +2,31 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import prefetch_related_objects
 
-from inventory.services import InsufficientStock, record_movement
+from inventory.services import (
+    InsufficientStock,
+    get_default_location,
+    record_movement,
+)
 from payments.serializers import PaymentSerializer
 from pricing.services import (
     PricelistUnavailable,
     VariationNotPriced,
+    get_prices,
     require_default_pricelist,
-    require_price,
 )
 from .models import Sale, SaleItem
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
     # The variation is what is written; the parent product is still exposed on
-    # read so existing clients keep the response shape they had.
-    product = serializers.PrimaryKeyRelatedField(
-        source="product_variation.product", read_only=True
+    # read so existing clients keep the response shape they had. Read from the
+    # variation's product_id column rather than by traversing to the Product
+    # itself: the id is what is emitted either way, and the traversal cost a
+    # query per line.
+    product = serializers.UUIDField(
+        source="product_variation.product_id", read_only=True
     )
 
     class Meta:
@@ -56,7 +64,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "total_amount",
         )
 
-    def _price_line(self, item_data, product_variation, user, pricelist):
+    def _price_line(self, item_data, product_variation, user, pricelist, prices):
         """Verify the submitted prices against the pricelist.
 
         Prices are never taken on trust: unit_price must equal the variation's
@@ -70,10 +78,11 @@ class SaleSerializer(serializers.ModelSerializer):
         discount = item_data.get("discount") or Decimal("0.00")
         selling_price = item_data.get("selling_price")
 
-        try:
-            catalogue_price = require_price(pricelist, product_variation)
-        except VariationNotPriced as exc:
-            raise serializers.ValidationError({"items": str(exc)}) from exc
+        catalogue_price = prices.get(product_variation.id)
+        if catalogue_price is None:
+            raise serializers.ValidationError(
+                {"items": str(VariationNotPriced(product_variation, pricelist))}
+            )
 
         if unit_price is None:
             unit_price = catalogue_price
@@ -120,7 +129,22 @@ class SaleSerializer(serializers.ModelSerializer):
 
         return unit_price, discount, selling_price, quantity * selling_price
 
-    def _build_item(self, sale, item_data, user):
+    def _build_items(self, sale, items_data, user):
+        """Create the sale's lines, resolving what they all share only once.
+
+        The pricelist lookup and the stock location are identical for every line
+        of a sale, so they are resolved for the basket rather than per line.
+        """
+        variations = [item_data["product_variation"] for item_data in items_data]
+        prices = get_prices(sale.pricelist, variations)
+        location = get_default_location(sale.organization)
+
+        return [
+            self._build_item(sale, item_data, user, prices, location)
+            for item_data in items_data
+        ]
+
+    def _build_item(self, sale, item_data, user, prices, location):
         """Create one sale line and move its stock out of the ledger."""
         product_variation = item_data["product_variation"]
 
@@ -130,7 +154,7 @@ class SaleSerializer(serializers.ModelSerializer):
             )
 
         unit_price, discount, selling_price, line_total = self._price_line(
-            item_data, product_variation, user, sale.pricelist
+            item_data, product_variation, user, sale.pricelist, prices
         )
         quantity = item_data.get("quantity")
 
@@ -154,6 +178,7 @@ class SaleSerializer(serializers.ModelSerializer):
                 product_variation=product_variation,
                 movement_type="SALE",
                 quantity=-quantity,
+                location=location,
                 user=user,
                 reference_number=str(sale.id),
                 notes=f"Sale {sale.id}",
@@ -163,13 +188,14 @@ class SaleSerializer(serializers.ModelSerializer):
 
         return item
 
-    def _reverse_item_stock(self, item, user):
+    def _reverse_item_stock(self, item, user, location):
         """Return a sale line's stock to the ledger when the line is removed."""
         record_movement(
             organization=item.organization,
             product_variation=item.product_variation,
             movement_type="ADJUSTMENT",
             quantity=item.quantity,
+            location=location,
             user=user,
             reference_number=str(item.sale_id),
             notes=f"Reversal of edited sale {item.sale_id}",
@@ -200,9 +226,15 @@ class SaleSerializer(serializers.ModelSerializer):
                 validated_data["organization"]
             )
             sale = Sale.objects.create(**validated_data)
-            for item_data in items_data:
-                self._build_item(sale, item_data, user)
+            self._build_items(sale, items_data, user)
 
+        # Populate the caches the response then reads, in a fixed number of
+        # queries rather than one per line. Without this the created sale is a
+        # bare instance, so serializing it walks back to the database for its
+        # lines, again for total_amount, and once per line for the variation.
+        prefetch_related_objects(
+            [sale], "items__product_variation", "payments__transactions"
+        )
         return sale
     
     def update(self, instance, validated_data):
@@ -228,11 +260,11 @@ class SaleSerializer(serializers.ModelSerializer):
                 # otherwise every edit silently loses inventory. Interim
                 # behaviour: once eTIMS submission exists, an invoiced sale must
                 # be corrected by credit note instead of being edited at all.
+                location = get_default_location(instance.organization)
                 for existing in instance.items.select_related("product_variation"):
-                    self._reverse_item_stock(existing, user)
+                    self._reverse_item_stock(existing, user, location)
                 instance.items.all().delete()
 
-                for item_data in items_data:
-                    self._build_item(instance, item_data, user)
+                self._build_items(instance, items_data, user)
 
         return instance

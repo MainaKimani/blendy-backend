@@ -86,8 +86,22 @@ class ProductViewSet(OrganizationBaseViewSet):
     def get_queryset(self):
         # Product no longer holds a price, so ordering by it is served from the
         # cheapest priced variation on any of the organization's pricelists.
-        return super().get_queryset().annotate(
-            price=Min("variations__pricelist_items__price")
+        #
+        # Everything the serializer reads is pulled in here. Without it each
+        # product cost a query for its category, its images, its variations, and
+        # then three more per variation for uom, currency and pricelist price —
+        # 243 queries for 20 products. With it, the listing is a flat 6.
+        return (
+            super()
+            .get_queryset()
+            .select_related("category")
+            .prefetch_related(
+                "images",
+                "variations__uom",
+                "variations__currency",
+                "variations__pricelist_items",
+            )
+            .annotate(price=Min("variations__pricelist_items__price"))
         )
 
     def get_permissions(self):
@@ -147,8 +161,15 @@ class ProductVariationViewSet(OrganizationBaseViewSet):
 
     # Scope queryset by organization (VERY IMPORTANT in multi-tenant)
     def get_queryset(self):
+        # `name` is a property that reads product.name and uom.symbol, and the
+        # price comes off the pricelist, so all three are pulled in here rather
+        # than fetched per row.
         return (
-            super().get_queryset().filter(organization=self.request.user.organization)
+            super()
+            .get_queryset()
+            .filter(organization=self.request.user.organization)
+            .select_related("product", "uom", "currency")
+            .prefetch_related("pricelist_items")
         )
 
     # Bulk + single create support
@@ -257,6 +278,20 @@ class ProductImageViewSet(OrganizationBaseViewSet):
 class ProductWithPriceViewSet(OrganizationBaseViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductWithPriceSerializer
+
+    def get_queryset(self):
+        # Same serializer shape as ProductViewSet, so the same prefetches apply.
+        return (
+            super()
+            .get_queryset()
+            .select_related("category")
+            .prefetch_related(
+                "images",
+                "variations__uom",
+                "variations__currency",
+                "variations__pricelist_items",
+            )
+        )
 
     def get_permissions(self):
         return []
