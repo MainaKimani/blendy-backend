@@ -16,25 +16,20 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsOrganizationUser]
 
     def get_permissions(self):
-        if self.action == "list" or self.action == "retrieve":
-            return [IsAuthenticated(), IsSuperAdminOrOrgAdmin(),]
-        elif self.action == "create":
-            return [
-                IsAuthenticated(),
-                IsSuperAdminOrOrgAdmin(),
-            ]
-        elif self.action == "update" or self.action == "partial_update":
-            return [
-                IsAuthenticated(),
-                IsSuperAdminOrOrgAdmin(),
-                IsOrganizationUser()
-            ]
-        elif self.action == "destroy":
-            return [
-                IsAuthenticated(),
-                IsSuperAdminOrOrgAdmin(),
-            ]
-        return [IsAuthenticated(), IsSuperAdminOrOrgAdmin()]
+        # IsOrganizationUser on *every* action, not only update. Without it the
+        # admin of one shop could create and list users inside another simply by
+        # changing the X-Organization header, because the queryset and
+        # perform_create both take the organization from that header while
+        # nothing checked the caller belonged to it.
+        #
+        # It is also what lets Blendy staff manage a shop's users while acting
+        # as that shop, since IsOrganizationUser now understands platform
+        # access, and what confines HQ staff management to HQ.
+        return [
+            IsAuthenticated(),
+            IsOrganizationUser(),
+            IsSuperAdminOrOrgAdmin(),
+        ]
 
     def get_queryset(self):
         return CustomUser.objects.filter(organization=self.request.organization)

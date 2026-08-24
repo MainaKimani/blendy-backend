@@ -33,7 +33,15 @@ class VariationNotPriced(Exception):
 
 
 def create_default_pricelist(organization):
-    """Give an organization the pricelist it needs in order to trade."""
+    """Give an organization the pricelist it needs in order to trade.
+
+    Blendy's own HQ is not a shop and never sells, so it is skipped: a platform
+    organization carrying a price list is incoherent, and the seeding paths walk
+    every organization without knowing the difference.
+    """
+    if getattr(organization, "is_platform", False):
+        return None
+
     pricelist, _ = Pricelist.objects.get_or_create(
         organization=organization,
         is_default=True,

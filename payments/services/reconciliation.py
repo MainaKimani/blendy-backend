@@ -21,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from organization.models import Organization
+from organization.services import tenants
 from sales.models import Sale
 
 from ..models import MpesaTransaction, Payment
@@ -86,15 +87,17 @@ def resolve_organization(shortcode):
     shortcode = str(shortcode or "").strip()
 
     if shortcode:
-        organization = Organization.objects.filter(
-            mpesa_shortcode=shortcode
-        ).first()
+        organization = tenants().filter(mpesa_shortcode=shortcode).first()
         if organization is not None:
             return organization
 
     configured = str(getattr(settings, "MPESA_SHORTCODE", "") or "").strip()
     if shortcode and configured and shortcode == configured:
-        organizations = list(Organization.objects.all()[:2])
+        # Counted over tenants, not over every organization: HQ is not a
+        # customer, and once it exists a genuinely single-tenant deployment
+        # would otherwise stop resolving — or worse, attribute a shop's money
+        # to us, since the ordering here is arbitrary.
+        organizations = list(tenants()[:2])
         if len(organizations) == 1:
             return organizations[0]
 

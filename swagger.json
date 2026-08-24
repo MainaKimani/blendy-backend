@@ -2166,7 +2166,8 @@
         "/organization/": {
             "get": {
                 "operationId": "organization_list",
-                "description": "",
+                "summary": "Customer organizations.",
+                "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list — and later, in\nits own billing run.",
                 "parameters": [
                     {
                         "name": "page",
@@ -2222,7 +2223,8 @@
             },
             "post": {
                 "operationId": "organization_create",
-                "description": "",
+                "summary": "Customer organizations.",
+                "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list — and later, in\nits own billing run.",
                 "parameters": [
                     {
                         "name": "data",
@@ -2246,6 +2248,95 @@
                 ]
             },
             "parameters": []
+        },
+        "/organization/access-log/": {
+            "get": {
+                "operationId": "organization_access-log_list",
+                "summary": "Who outside this organization has reached into its data.",
+                "description": "The tenant-facing half of the audit trail. A shop whose revenue figures\nBlendy staff can read should be able to see when that happened, without\nasking us — an assurance that is worth little if it depends on us answering.\n\nScoped to the caller's own organization and read-only, like its HQ\ncounterpart. Where the two differ is *who gets named*: see\nTenantAccessLogSerializer.",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "required": false,
+                        "type": "integer"
+                    },
+                    {
+                        "name": "page_size",
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "required": false,
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "required": [
+                                "count",
+                                "results"
+                            ],
+                            "type": "object",
+                            "properties": {
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "next": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "x-nullable": true
+                                },
+                                "previous": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "x-nullable": true
+                                },
+                                "results": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/TenantAccessLog"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "organization"
+                ]
+            },
+            "parameters": []
+        },
+        "/organization/access-log/{id}/": {
+            "get": {
+                "operationId": "organization_access-log_read",
+                "summary": "Who outside this organization has reached into its data.",
+                "description": "The tenant-facing half of the audit trail. A shop whose revenue figures\nBlendy staff can read should be able to see when that happened, without\nasking us — an assurance that is worth little if it depends on us answering.\n\nScoped to the caller's own organization and read-only, like its HQ\ncounterpart. Where the two differ is *who gets named*: see\nTenantAccessLogSerializer.",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TenantAccessLog"
+                        }
+                    }
+                },
+                "tags": [
+                    "organization"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this platform access log.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
         },
         "/organization/onboard/": {
             "post": {
@@ -2290,10 +2381,141 @@
             },
             "parameters": []
         },
+        "/organization/platform-access-log/": {
+            "get": {
+                "operationId": "organization_platform-access-log_list",
+                "summary": "Who reached into which organization, and whether they were allowed.",
+                "description": "Read-only by construction: an audit trail that its subject — or its actor —\ncan edit is not one. There is no write path at all, not even for a\nsuperadmin, so the only way a row changes is a database migration.\n\nNot tenant-scoped. It records access *across* tenants, so scoping it to one\nwould hide exactly the rows worth looking at.",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "required": false,
+                        "type": "integer"
+                    },
+                    {
+                        "name": "page_size",
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "required": false,
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "required": [
+                                "count",
+                                "results"
+                            ],
+                            "type": "object",
+                            "properties": {
+                                "count": {
+                                    "type": "integer"
+                                },
+                                "next": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "x-nullable": true
+                                },
+                                "previous": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "x-nullable": true
+                                },
+                                "results": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/PlatformAccessLog"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "organization"
+                ]
+            },
+            "parameters": []
+        },
+        "/organization/platform-access-log/{id}/": {
+            "get": {
+                "operationId": "organization_platform-access-log_read",
+                "summary": "Who reached into which organization, and whether they were allowed.",
+                "description": "Read-only by construction: an audit trail that its subject — or its actor —\ncan edit is not one. There is no write path at all, not even for a\nsuperadmin, so the only way a row changes is a database migration.\n\nNot tenant-scoped. It records access *across* tenants, so scoping it to one\nwould hide exactly the rows worth looking at.",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/PlatformAccessLog"
+                        }
+                    }
+                },
+                "tags": [
+                    "organization"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this platform access log.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/organization/platform/": {
+            "get": {
+                "operationId": "organization_platform",
+                "summary": "The platform (HQ) organization",
+                "description": "Blendy's own organization, which the customer listing deliberately excludes. Platform staff need its id to send as X-Organization when working on HQ itself — managing their own staff, for instance — and it is otherwise only obtainable from the shell.\n\nOpen to any holder of a `platform.*` permission, since knowing HQ exists is not itself sensitive.",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "required": false,
+                        "type": "integer"
+                    },
+                    {
+                        "name": "page_size",
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "required": false,
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Organization"
+                        }
+                    },
+                    "403": {
+                        "description": "Not platform staff."
+                    },
+                    "404": {
+                        "description": "No platform organization exists; run `manage.py bootstrap_hq`."
+                    }
+                },
+                "tags": [
+                    "organization"
+                ]
+            },
+            "parameters": []
+        },
         "/organization/{id}/": {
             "get": {
                 "operationId": "organization_read",
-                "description": "",
+                "summary": "Customer organizations.",
+                "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list — and later, in\nits own billing run.",
                 "parameters": [],
                 "responses": {
                     "200": {
@@ -2309,7 +2531,8 @@
             },
             "put": {
                 "operationId": "organization_update",
-                "description": "",
+                "summary": "Customer organizations.",
+                "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list — and later, in\nits own billing run.",
                 "parameters": [
                     {
                         "name": "data",
@@ -2334,7 +2557,8 @@
             },
             "patch": {
                 "operationId": "organization_partial_update",
-                "description": "",
+                "summary": "Customer organizations.",
+                "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list — and later, in\nits own billing run.",
                 "parameters": [
                     {
                         "name": "data",
@@ -2359,7 +2583,8 @@
             },
             "delete": {
                 "operationId": "organization_delete",
-                "description": "",
+                "summary": "Customer organizations.",
+                "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list — and later, in\nits own billing run.",
                 "parameters": [],
                 "responses": {
                     "204": {
@@ -6056,6 +6281,11 @@
                     "format": "uuid",
                     "readOnly": true
                 },
+                "is_platform": {
+                    "title": "Is platform",
+                    "type": "boolean",
+                    "readOnly": true
+                },
                 "name": {
                     "title": "Name",
                     "type": "string",
@@ -6847,6 +7077,55 @@
                 }
             }
         },
+        "TenantAccessLog": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "actor": {
+                    "title": "Actor",
+                    "type": "string",
+                    "readOnly": true
+                },
+                "actor_is_platform": {
+                    "title": "Actor is platform",
+                    "type": "boolean",
+                    "readOnly": true
+                },
+                "method": {
+                    "title": "Method",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "path": {
+                    "title": "Path",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "status_code": {
+                    "title": "Status code",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "granted": {
+                    "title": "Granted",
+                    "type": "boolean",
+                    "readOnly": true
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                }
+            }
+        },
         "OnboardOrganization": {
             "required": [
                 "organization",
@@ -6859,6 +7138,71 @@
                 },
                 "user": {
                     "$ref": "#/definitions/CustomUser"
+                }
+            }
+        },
+        "PlatformAccessLog": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "actor": {
+                    "title": "Actor",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true,
+                    "x-nullable": true
+                },
+                "actor_email": {
+                    "title": "Actor email",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "organization": {
+                    "title": "Organization",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true,
+                    "x-nullable": true
+                },
+                "organization_slug": {
+                    "title": "Organization slug",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "method": {
+                    "title": "Method",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "path": {
+                    "title": "Path",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "status_code": {
+                    "title": "Status code",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "granted": {
+                    "title": "Granted",
+                    "type": "boolean",
+                    "readOnly": true
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
                 }
             }
         },

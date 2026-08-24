@@ -15,12 +15,16 @@ from authorization.rbac import (
     CASHIER,
     DEFAULT_ORGANIZATION_ROLES,
     ORG_ADMIN,
+    PLATFORM_ADMIN,
     ROLES,
+    SUPPORT_AGENT,
     VIEWER,
     enable_default_roles,
     permission_names,
     sync_rbac,
+    tenant_permission_names,
 )
+from blendy_backend.testing import make_organization
 from organization.models import Organization
 from pricing.services import get_default_pricelist
 from products.models import Category, Product, ProductVariation
@@ -59,13 +63,27 @@ class CatalogueTests(APITestCase):
             with self.subTest(permission=name):
                 self.assertTrue(Permission.objects.filter(name=name).exists())
 
-    def test_org_admin_holds_the_whole_catalogue(self):
+    def test_org_admin_holds_the_whole_tenant_catalogue(self):
         """Derived, not listed — a forgotten entry would lock the owner out."""
         role = Role.objects.get(name=ORG_ADMIN)
 
         held = set(role.permissions.values_list("name", flat=True))
 
-        self.assertEqual(held, set(permission_names()))
+        self.assertEqual(held, set(tenant_permission_names()))
+
+    def test_org_admin_holds_no_platform_permission(self):
+        """The load-bearing separation.
+
+        ORG_ADMIN is derived from a pool. If that pool were the whole catalogue
+        rather than the tenant half, every shop owner would silently gain
+        platform.access_tenants — and with it, read access to every other shop
+        in the deployment.
+        """
+        held = set(
+            Role.objects.get(name=ORG_ADMIN).permissions.values_list("name", flat=True)
+        )
+
+        self.assertEqual([n for n in held if n.startswith("platform.")], [])
 
     def test_cashier_cannot_change_prices_or_manage_staff(self):
         """US-15's restriction, stated as what the role must not hold."""
@@ -120,7 +138,7 @@ class CatalogueTests(APITestCase):
         sync_rbac()
 
         role.refresh_from_db()
-        self.assertEqual(role.permissions.count(), len(permission_names()))
+        self.assertEqual(role.permissions.count(), len(tenant_permission_names()))
 
 
 class OnboardedOwnerTests(APITestCase):
@@ -190,7 +208,7 @@ class OnboardedOwnerTests(APITestCase):
 
     def test_the_owner_holds_every_permission(self):
         self.assertEqual(
-            self.owner.get_permission_names(), frozenset(permission_names())
+            self.owner.get_permission_names(), frozenset(tenant_permission_names())
         )
 
 
@@ -633,3 +651,182 @@ class EnforcedAccessTests(APITestCase):
         ]:
             with self.subTest(permission=name):
                 self.assertIn(name, catalogue)
+
+
+class PlatformRoleTests(APITestCase):
+    """Blendy's own roles: seeded globally, enabled on HQ, absent from shops."""
+
+    def setUp(self):
+        from organization.services import get_platform_organization
+
+        self.hq = get_platform_organization()
+        self.shop = make_organization("Mama Duka", "mama-duka")
+
+    def _held(self, role_name):
+        return set(
+            Role.objects.get(name=role_name).permissions.values_list("name", flat=True)
+        )
+
+    # --- the separation that matters most ---------------------------------
+
+    def test_platform_permissions_exist(self):
+        from authorization.rbac import platform_permission_names
+
+        missing = set(platform_permission_names()) - set(
+            Permission.objects.values_list("name", flat=True)
+        )
+
+        self.assertEqual(missing, set())
+
+    def test_no_tenant_role_holds_a_platform_permission(self):
+        """A shop's staff must never hold a key to another shop."""
+        from authorization.rbac import DEFAULT_ORGANIZATION_ROLES
+
+        for role_name in DEFAULT_ORGANIZATION_ROLES:
+            with self.subTest(role=role_name):
+                held = self._held(role_name)
+                self.assertEqual(
+                    sorted(n for n in held if n.startswith("platform.")), []
+                )
+
+    def test_platform_roles_are_not_enabled_on_any_shop(self):
+        from authorization.rbac import PLATFORM_ROLES
+
+        enabled = set(
+            OrganizationRole.objects.filter(organization=self.shop).values_list(
+                "role__name", flat=True
+            )
+        )
+
+        self.assertEqual(enabled & set(PLATFORM_ROLES), set())
+
+    def test_onboarding_a_new_shop_does_not_enable_platform_roles(self):
+        from authorization.rbac import PLATFORM_ROLES
+
+        root = CustomUser.objects.create_superuser(
+            email="root@blendy.test", username="root", password="pw"
+        )
+        self.client.force_authenticate(user=root)
+        self.client.post(
+            "/api/organization/onboard/",
+            {
+                "organization": {"name": "Second Shop", "slug": "second-shop"},
+                "user": {"email": "o2@shop.test", "username": "o2", "password": "pw"},
+            },
+            format="json",
+        )
+
+        enabled = set(
+            OrganizationRole.objects.filter(
+                organization__slug="second-shop"
+            ).values_list("role__name", flat=True)
+        )
+        self.assertEqual(enabled & set(PLATFORM_ROLES), set())
+
+    # --- what each platform role is for -----------------------------------
+
+    def test_platform_roles_are_enabled_on_hq(self):
+        from authorization.rbac import PLATFORM_ROLES
+
+        enabled = set(
+            OrganizationRole.objects.filter(organization=self.hq).values_list(
+                "role__name", flat=True
+            )
+        )
+
+        self.assertEqual(set(PLATFORM_ROLES) - enabled, set())
+
+    def test_support_agent_can_cross_the_boundary_but_not_write(self):
+        held = self._held(SUPPORT_AGENT)
+
+        self.assertIn("platform.access_tenants", held)
+        # Read-only is not enforced separately — it falls out of holding no
+        # write permission at all.
+        self.assertNotIn("platform.act_as_tenant", held)
+        writes = [
+            n for n in held
+            if any(f".{verb}_" in n for verb in ("add", "change", "delete"))
+        ]
+        self.assertEqual(writes, [])
+
+    def test_support_agent_can_see_what_a_shop_would_call_about(self):
+        held = self._held(SUPPORT_AGENT)
+
+        for name in [
+            "sales.view_sale",
+            "payments.view_payment",
+            "inventory.view_inventoryitem",
+            "pricing.view_pricelistitem",
+            "products.view_product",
+        ]:
+            with self.subTest(permission=name):
+                self.assertIn(name, held)
+
+    def test_platform_admin_can_act_and_administer(self):
+        held = self._held(PLATFORM_ADMIN)
+
+        for name in [
+            "platform.access_tenants",
+            "platform.act_as_tenant",
+            "platform.onboard_organization",
+            "platform.manage_platform_staff",
+            "platform.view_access_log",
+        ]:
+            with self.subTest(permission=name):
+                self.assertIn(name, held)
+
+    def test_platform_admin_holds_everything_support_does(self):
+        self.assertTrue(self._held(SUPPORT_AGENT).issubset(self._held(PLATFORM_ADMIN)))
+
+    # --- resolution through the real chain --------------------------------
+
+    def test_an_hq_user_resolves_platform_permissions(self):
+        agent = CustomUser.objects.create_user(
+            email="agent@blendy.test", username="agent", password="pw",
+            organization=self.hq,
+        )
+        UserRoleAssignment.objects.create(
+            user=agent,
+            organization_role=OrganizationRole.objects.get(
+                organization=self.hq, role__name=SUPPORT_AGENT
+            ),
+        )
+
+        held = agent.get_permission_names()
+
+        self.assertIn("platform.access_tenants", held)
+        self.assertIn("sales.view_sale", held)
+        self.assertNotIn("sales.add_sale", held)
+
+    def test_a_shop_owner_resolves_no_platform_permission(self):
+        owner = CustomUser.objects.create_user(
+            email="owner@mama-duka.test", username="owner", password="pw",
+            organization=self.shop,
+        )
+        UserRoleAssignment.objects.create(
+            user=owner,
+            organization_role=OrganizationRole.objects.get(
+                organization=self.shop, role__name=ORG_ADMIN
+            ),
+        )
+
+        held = owner.get_permission_names()
+
+        self.assertIn("sales.add_sale", held)
+        self.assertEqual([n for n in held if n.startswith("platform.")], [])
+
+    def test_enabling_platform_roles_is_idempotent(self):
+        from authorization.rbac import enable_platform_roles
+
+        before = OrganizationRole.objects.count()
+
+        self.assertEqual(enable_platform_roles(), 0)
+        self.assertEqual(OrganizationRole.objects.count(), before)
+
+    def test_enabling_platform_roles_without_hq_is_a_no_op(self):
+        from authorization.rbac import enable_platform_roles
+        from organization.models import Organization
+
+        Organization.objects.filter(is_platform=True).delete()
+
+        self.assertEqual(enable_platform_roles(), 0)

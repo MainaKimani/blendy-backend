@@ -1,0 +1,2957 @@
+{
+  "info": {
+    "name": "Blendy \u00b7 User Journeys",
+    "description": "Ordered workflows that chain into each other \u2014 run a folder top to bottom in the Collection Runner and it executes unattended.\n\n**Run J1 first.** It creates the shop, catalogue and stock that every later journey uses, and captures the ids into collection variables.\n\n**Setup**\n1. `python manage.py migrate` \u2014 seeds the RBAC catalogue\n2. `python manage.py createsuperuser`\n3. Start the server with the webhook token set:\n   `MPESA_WEBHOOK_TOKEN=tok-123 MPESA_WEBHOOK_ENFORCE_IP=false python manage.py runserver`\n4. Set `superadmin_email` and `superadmin_password` below\n\nEvery request asserts its own outcome, so a red run tells you which step broke rather than leaving you to compare payloads.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "description": "Where the API is running."
+    },
+    {
+      "key": "superadmin_email",
+      "value": "",
+      "description": "From manage.py createsuperuser. Needed to onboard a shop."
+    },
+    {
+      "key": "superadmin_password",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "mpesa_webhook_token",
+      "value": "tok-123",
+      "description": "Must equal MPESA_WEBHOOK_TOKEN on the server."
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "description": "Set by every login step."
+    },
+    {
+      "key": "owner_token",
+      "value": "",
+      "description": "Kept so J6 can switch back."
+    },
+    {
+      "key": "organization_id",
+      "value": "",
+      "description": "Captured in J1. Sent as X-Organization."
+    },
+    {
+      "key": "pricelist_id",
+      "value": ""
+    },
+    {
+      "key": "category_id",
+      "value": ""
+    },
+    {
+      "key": "product_id",
+      "value": ""
+    },
+    {
+      "key": "variation_id",
+      "value": "",
+      "description": "The sellable unit every journey trades in."
+    },
+    {
+      "key": "sale_id",
+      "value": ""
+    },
+    {
+      "key": "guest_sale_id",
+      "value": ""
+    },
+    {
+      "key": "payment_id",
+      "value": ""
+    },
+    {
+      "key": "checkout_request_id",
+      "value": "",
+      "description": "Echoed back on the STK callback."
+    },
+    {
+      "key": "merchant_request_id",
+      "value": ""
+    },
+    {
+      "key": "cashier_role_id",
+      "value": ""
+    },
+    {
+      "key": "hq_organization_id",
+      "value": "",
+      "description": "Captured by J9 step 2 from GET /api/organization/platform/. HQ is not listed by GET /api/organization/, which returns customers only."
+    },
+    {
+      "key": "platform_admin_role_id",
+      "value": ""
+    },
+    {
+      "key": "support_agent_role_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "J1 \u00b7 Open a shop",
+      "description": "Everything a new shop needs before it can sell anything: an organization, an owner, a priced catalogue, and stock on the shelf.\n\n**Run this first.** Every later journey uses the organization, variation and token it captures.",
+      "item": [
+        {
+          "name": "1. Log in as superadmin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Only a superadmin may onboard an organization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{superadmin_email}}\",\n  \"password\": \"{{superadmin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('logged in', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Onboard the shop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/organization/onboard/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "onboard"
+              ]
+            },
+            "description": "Creates the organization, its Default Pricelist, its ORG_ADMIN owner, and enables the built-in roles \u2014 one transaction.\n\nThe returned organization id is what every later request sends as X-Organization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization\": {\n    \"name\": \"Mama Duka\",\n    \"slug\": \"mama-duka\",\n    \"mpesa_shortcode\": \"174379\"\n  },\n  \"user\": {\n    \"email\": \"owner@mamaduka.test\",\n    \"username\": \"owner\",\n    \"password\": \"s3cret\",\n    \"first_name\": \"Amina\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('shop created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('organization_id', b.organization.id);",
+                  "pm.test('owner is ORG_ADMIN', () =>",
+                  "    pm.expect(b.user.assigned_roles).to.include('ORG_ADMIN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Log in as the owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner@mamaduka.test\",\n  \"password\": \"s3cret\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('owner logged in', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);",
+                  "pm.collectionVariables.set('owner_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Confirm the default pricelist",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pricing/pricelists/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pricing",
+                "pricelists"
+              ]
+            },
+            "description": "Onboarding created it. Without a pricelist the shop cannot price or sell anything, so this is worth checking before going further."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reachable', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().results;",
+                  "pm.test('Default Pricelist exists', () =>",
+                  "    pm.expect(r.some(p => p.is_default)).to.be.true);",
+                  "pm.collectionVariables.set('pricelist_id', r.find(p => p.is_default).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Create a category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/products/categories/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "categories"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Groceries\",\n  \"description\": \"Dry goods\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('category_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Create a product with priced variations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/products/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "description": "At least one variation is required and each must carry a selling_price.\n\n`cost_price` stays on the variation; `selling_price` is written to the Default Pricelist. You write `selling_price` and read back `price`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mumias Sugar\",\n  \"description\": \"Refined white sugar\",\n  \"category_id\": \"{{category_id}}\",\n  \"variations\": [\n    {\n      \"sku\": \"SUG-1KG\",\n      \"cost_price\": \"120.00\",\n      \"selling_price\": \"165.00\",\n      \"reorder_level\": 10\n    },\n    {\n      \"sku\": \"SUG-2KG\",\n      \"cost_price\": \"230.00\",\n      \"selling_price\": \"310.00\",\n      \"reorder_level\": 5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('product_id', b.id);",
+                  "pm.collectionVariables.set('variation_id', b.variations[0].id);",
+                  "pm.test('price came back from the pricelist', () =>",
+                  "    pm.expect(b.variations[0].price).to.eql('165.00'));",
+                  "pm.test('product itself carries no price', () =>",
+                  "    pm.expect(b).to.not.have.property('price'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Receive opening stock",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/restock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "restock"
+              ]
+            },
+            "description": "Writes a STOCK_IN entry to the ledger and updates the cached balance in the same transaction. `available_quantity` in the response is recomputed from the ledger, so it doubles as a check that the two agree.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_variation\": \"{{variation_id}}\",\n  \"quantity\": 50,\n  \"unit_cost\": \"120.00\",\n  \"reference_number\": \"GRN-0012\",\n  \"notes\": \"Opening stock\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('stocked', () => pm.response.to.have.status(201));",
+                  "pm.test('balance is 50', () =>",
+                  "    pm.expect(pm.response.json().available_quantity).to.eql(50));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J2 \u00b7 Sell, and get paid by STK push",
+      "description": "The daily loop, happy path. The customer's phone prompts, they enter their PIN, Safaricom calls back, the sale is PAID.\n\nStep 3 stands in for Safaricom. Point `base_url` at a local server started with `MPESA_WEBHOOK_TOKEN=tok-123 MPESA_WEBHOOK_ENFORCE_IP=false`.",
+      "item": [
+        {
+          "name": "1. Record the sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "`unit_price` is optional \u2014 omit it and the pricelist price applies. Supply it and it must match exactly.\n\nCreating the sale decrements stock through the ledger in the same transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_phone\": \"0712345678\",\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 2,\n      \"unit_price\": \"165.00\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('sale recorded', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('sale_id', b.id);",
+                  "pm.test('total is 330.00', () => pm.expect(b.total_amount).to.eql('330.00'));",
+                  "pm.test('starts UNPAID', () => pm.expect(b.payment_status).to.eql('UNPAID'));",
+                  "pm.test('cost snapshotted onto the line', () =>",
+                  "    pm.expect(b.items[0].cost_price).to.eql('120.00'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Trigger the STK push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/payments/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "payments"
+              ]
+            },
+            "description": "`amount` must equal the sale total. The phone number is normalised to +254 and checked against Safaricom prefixes.\n\nThe result arrives on the webhook, not in this response \u2014 the payment comes back PENDING.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sale\": \"{{sale_id}}\",\n  \"provider\": \"MPESA\",\n  \"phone_number\": \"0712345678\",\n  \"amount\": \"330.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('push sent', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('payment_id', b.id);",
+                  "pm.collectionVariables.set('checkout_request_id', b.provider_reference);",
+                  "pm.collectionVariables.set('merchant_request_id', b.merchant_reference);",
+                  "pm.test('pending until the callback', () =>",
+                  "    pm.expect(b.status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Safaricom confirms success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhooks/mpesa/{{mpesa_webhook_token}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "webhooks",
+                "mpesa",
+                "{{mpesa_webhook_token}}"
+              ]
+            },
+            "description": "**Safaricom calls this, not your client.** The token in the URL is the shared secret, since Safaricom does not sign callbacks.\n\nChange `Amount` to 300.00 and re-run: the sale stays UNPAID and the payment is flagged MISMATCH. A success callback for the wrong amount never marks a sale paid.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Body\": {\n    \"stkCallback\": {\n      \"MerchantRequestID\": \"{{merchant_request_id}}\",\n      \"CheckoutRequestID\": \"{{checkout_request_id}}\",\n      \"ResultCode\": 0,\n      \"ResultDesc\": \"The service request is processed successfully.\",\n      \"CallbackMetadata\": {\n        \"Item\": [\n          {\n            \"Name\": \"Amount\",\n            \"Value\": 330.0\n          },\n          {\n            \"Name\": \"MpesaReceiptNumber\",\n            \"Value\": \"TGH7YU8KLM\"\n          },\n          {\n            \"Name\": \"TransactionDate\",\n            \"Value\": 20260822131549\n          },\n          {\n            \"Name\": \"PhoneNumber\",\n            \"Value\": 254712345678\n          }\n        ]\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('processed', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. The sale is now PAID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/{{sale_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales",
+                "{{sale_id}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('readable', () => pm.response.to.have.status(200));",
+                  "pm.test('PAID', () =>",
+                  "    pm.expect(pm.response.json().payment_status).to.eql('PAID'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J3 \u00b7 STK push fails, customer pays the Till",
+      "description": "MVP \u00a78 / US-9b / US-9c \u2014 the fallback that matters most in a real shop.\n\nThe push fails, but the sale is **not** closed. It moves to AWAITING_DIRECT_PAYMENT, the customer pays the Till from the M-Pesa menu, and the incoming C2B confirmation is matched back to the sale by phone number and amount.",
+      "item": [
+        {
+          "name": "1. Record the sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_phone\": \"0712345678\",\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 2,\n      \"unit_price\": \"165.00\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('recorded', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('sale_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Trigger the STK push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/payments/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "payments"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sale\": \"{{sale_id}}\",\n  \"provider\": \"MPESA\",\n  \"phone_number\": \"0712345678\",\n  \"amount\": \"330.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('sent', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('checkout_request_id', b.provider_reference);",
+                  "pm.collectionVariables.set('merchant_request_id', b.merchant_reference);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. The push fails",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhooks/mpesa/{{mpesa_webhook_token}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "webhooks",
+                "mpesa",
+                "{{mpesa_webhook_token}}"
+              ]
+            },
+            "description": "Any non-zero ResultCode. 1032 is a user cancel.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Body\": {\n    \"stkCallback\": {\n      \"MerchantRequestID\": \"{{merchant_request_id}}\",\n      \"CheckoutRequestID\": \"{{checkout_request_id}}\",\n      \"ResultCode\": 1032,\n      \"ResultDesc\": \"Request cancelled by user\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('processed', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. The sale is queued, not closed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/pending-payments/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales",
+                "pending-payments"
+              ]
+            },
+            "description": "The owner's queue for anything still owed \u2014 sales awaiting a direct payment, and sales never paid at all."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reachable', () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json().results;",
+                  "pm.test('our sale is awaiting a direct payment', () =>",
+                  "    pm.expect(rows.some(s => s.id === pm.collectionVariables.get('sale_id')",
+                  "        && s.payment_status === 'AWAITING_DIRECT_PAYMENT')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Customer pays the Till directly",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhooks/mpesa-c2b/{{mpesa_webhook_token}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "webhooks",
+                "mpesa-c2b",
+                "{{mpesa_webhook_token}}"
+              ]
+            },
+            "description": "A direct payment has no CheckoutRequestID, so it is attributed to a tenant by BusinessShortCode and matched to an open sale by MSISDN + TransAmount inside a 24-hour window.\n\nMatching is idempotent on TransID \u2014 re-run this and nothing double-counts.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TransactionType\": \"Pay Bill\",\n  \"TransID\": \"TGH7YU8KLM\",\n  \"TransTime\": \"20260822131549\",\n  \"TransAmount\": \"330.00\",\n  \"BusinessShortCode\": \"174379\",\n  \"MSISDN\": \"254712345678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('acknowledged', () => pm.response.to.have.status(200));",
+                  "pm.test('matched to the sale', () =>",
+                  "    pm.expect(pm.response.json().matched).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. The sale is reconciled to PAID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/{{sale_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales",
+                "{{sale_id}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PAID', () =>",
+                  "    pm.expect(pm.response.json().payment_status).to.eql('PAID'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J4 \u00b7 A direct payment that matches nothing",
+      "description": "US-10. Money arrives that cannot be tied to an open sale \u2014 no candidate, or more than one. It is **not** dropped and **not** guessed at: it waits in a queue with a note saying why.",
+      "item": [
+        {
+          "name": "1. Unattributable money arrives",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhooks/mpesa-c2b/{{mpesa_webhook_token}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "webhooks",
+                "mpesa-c2b",
+                "{{mpesa_webhook_token}}"
+              ]
+            },
+            "description": "Still answers 200 in Safaricom's expected shape, so it stops retrying \u2014 but `matched` is false.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TransactionType\": \"Pay Bill\",\n  \"TransID\": \"NOMATCH001\",\n  \"TransTime\": \"20260822140000\",\n  \"TransAmount\": \"999.00\",\n  \"BusinessShortCode\": \"174379\",\n  \"MSISDN\": \"254799999999\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('acknowledged', () => pm.response.to.have.status(200));",
+                  "pm.test('not matched', () =>",
+                  "    pm.expect(pm.response.json().matched).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. It waits for a human",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/payments/unmatched/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "payments",
+                "unmatched"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reachable', () => pm.response.to.have.status(200));",
+                  "pm.test('the payment is queued', () =>",
+                  "    pm.expect(pm.response.json().results.some(",
+                  "        t => t.mpesa_receipt_number === 'NOMATCH001'",
+                  "          || t.checkout_request_id === '')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J5 \u00b7 Stock runs low and is replenished",
+      "description": "US-3, US-17, US-19. Stock is a ledger, not a number: every change is an entry, and the balance is a cache of those entries.",
+      "item": [
+        {
+          "name": "1. Sell down toward the threshold",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "Leaves the variation at or below its reorder_level of 10.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 38\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('sold', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. The low-stock queue picks it up",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/low-stock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "low-stock"
+              ]
+            },
+            "description": "The threshold is **inclusive** \u2014 selling down *to* it fires the alert, not only going under. Most urgent first."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reachable', () => pm.response.to.have.status(200));",
+                  "pm.test('our variation is listed', () =>",
+                  "    pm.expect(pm.response.json().results.some(",
+                  "        r => r.product_variation_id === pm.collectionVariables.get('variation_id')",
+                  "    )).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. A physical count finds fewer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/adjust/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "adjust"
+              ]
+            },
+            "description": "Send **exactly one** of `counted_quantity` (the figure on the shelf) or `quantity` (a signed change).\n\n`reason` is never optional \u2014 an unexplained adjustment is what the ledger exists to rule out.\n\nThe difference is computed under the row lock that writes it, so a sale landing mid-count cannot be silently undone.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_variation\": \"{{variation_id}}\",\n  \"counted_quantity\": 8,\n  \"reason\": \"Monthly count: two bags damaged\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('adjusted', () => pm.response.to.have.status(201));",
+                  "pm.test('balance is now 8', () =>",
+                  "    pm.expect(pm.response.json().available_quantity).to.eql(8));",
+                  "pm.test('recorded as a negative movement', () =>",
+                  "    pm.expect(pm.response.json().movement.quantity).to.be.below(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Restock clears the alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/restock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "restock"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_variation\": \"{{variation_id}}\",\n  \"quantity\": 40,\n  \"unit_cost\": \"122.00\",\n  \"reference_number\": \"GRN-0013\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('restocked', () => pm.response.to.have.status(201));",
+                  "pm.test('balance is 48', () =>",
+                  "    pm.expect(pm.response.json().available_quantity).to.eql(48));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. The ledger explains every change",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock-movements/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock-movements"
+              ]
+            },
+            "description": "Append-only and read-only. A POST here returns 405 \u2014 stock moves through the restock, adjust and sale paths only, so the balance can never drift from the entries that explain it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('readable', () => pm.response.to.have.status(200));",
+                  "const kinds = pm.response.json().results.map(m => m.movement_type);",
+                  "pm.test('shows stock in, sale and adjustment', () => {",
+                  "    pm.expect(kinds).to.include('STOCK_IN');",
+                  "    pm.expect(kinds).to.include('SALE');",
+                  "    pm.expect(kinds).to.include('ADJUSTMENT');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. The ledger cannot be written directly",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock-movements/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock-movements"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_variation\": \"{{variation_id}}\",\n  \"movement_type\": \"STOCK_IN\",\n  \"quantity\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused with 405', () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J6 \u00b7 Hire a cashier",
+      "description": "US-15. A cashier records sales and sees stock, but cannot change prices, move stock, or manage staff.",
+      "item": [
+        {
+          "name": "1. See which roles the shop has enabled",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/authorization/organization-roles/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "authorization",
+                "organization-roles"
+              ]
+            },
+            "description": "Onboarding enables ORG_ADMIN, CASHIER and VIEWER. To enable another, POST {\"role_id\": \"...\"} here \u2014 the organization comes from the header, never the body."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reachable', () => pm.response.to.have.status(200));",
+                  "const row = pm.response.json().results.find(r => r.role.name === 'CASHIER');",
+                  "pm.test('CASHIER is enabled', () => pm.expect(row).to.not.be.undefined);",
+                  "pm.collectionVariables.set('cashier_role_id', row.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Create the cashier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"till@mamaduka.test\",\n  \"username\": \"till\",\n  \"password\": \"till-pass\",\n  \"organization_role_ids\": [\n    \"{{cashier_role_id}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "pm.test('holds CASHIER', () =>",
+                  "    pm.expect(pm.response.json().assigned_roles).to.include('CASHIER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Log in as the cashier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"till@mamaduka.test\",\n  \"password\": \"till-pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('logged in', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. The cashier records a sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('allowed', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. \u2026and can see the stock position",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/low-stock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "low-stock"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('allowed', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. \u2026but cannot move stock",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/restock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "restock"
+              ]
+            },
+            "description": "The sharpest owner/till line: a cashier sells stock down but cannot restock or adjust it, so the ledger's write path stays with whoever is accountable for the count.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_variation\": \"{{variation_id}}\",\n  \"quantity\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. \u2026and cannot change prices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pricing/pricelists/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pricing",
+                "pricelists"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cheap\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Log back in as the owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Restores the owner token for the remaining journeys.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner@mamaduka.test\",\n  \"password\": \"s3cret\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J7 \u00b7 Guest checkout",
+      "description": "A walk-in customer with no account. Two endpoints stay open to anonymous callers \u2014 creating a sale and paying for it \u2014 and nothing else does.",
+      "item": [
+        {
+          "name": "1. Browse the catalogue anonymously",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/products/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('open', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Check out anonymously",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "Deliberately not permission-gated on any role: a customer at the till holds no role at all.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Walk-in\",\n  \"customer_phone\": \"0722000111\",\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('checked out', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('guest_sale_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Pay anonymously",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/payments/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "payments"
+              ]
+            },
+            "description": "Rate limited when anonymous \u2014 5/hour per phone number, 20/hour per IP \u2014 because it fires an STK push at a caller-supplied number. Run it six times to see a 429.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sale\": \"{{guest_sale_id}}\",\n  \"provider\": \"MPESA\",\n  \"phone_number\": \"0722000111\",\n  \"amount\": \"165.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. \u2026but cannot read the shop's sales",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J8 \u00b7 Guardrails",
+      "description": "The refusals worth knowing before you build a UI, since each one is an error state a form has to handle.",
+      "item": [
+        {
+          "name": "1. A price that does not match the pricelist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "Prices are never taken on trust. Any concession must be declared in `discount`, where it stays visible, rather than hidden in a reduced unit price.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 1,\n      \"unit_price\": \"100.00\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('names the pricelist', () =>",
+                  "    pm.expect(pm.response.text()).to.include('Default Pricelist'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Selling more than you hold",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 99999\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('says how much is left', () =>",
+                  "    pm.expect(pm.response.text()).to.include('Insufficient stock'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. A product whose variation has no price",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/products/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "description": "A product with no priced variation is not sellable, so it is refused rather than created.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Unpriced Thing\",\n  \"category_id\": \"{{category_id}}\",\n  \"variations\": [\n    {\n      \"sku\": \"NOPRICE\",\n      \"cost_price\": \"10.00\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('points at selling_price', () =>",
+                  "    pm.expect(pm.response.text()).to.include('selling_price'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. A product with no variations at all",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/products/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Empty\",\n  \"category_id\": \"{{category_id}}\",\n  \"variations\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. An anonymous caller granting themselves a discount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "Guest checkout stays open, but it cannot discount itself.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_variation\": \"{{variation_id}}\",\n      \"quantity\": 1,\n      \"unit_price\": \"165.00\",\n      \"discount\": \"50.00\",\n      \"selling_price\": \"115.00\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('says why', () =>",
+                  "    pm.expect(pm.response.text()).to.include('signed-in user'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. A missing X-Organization header",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "On a write this is a 403. On a **read** the queryset resolves to no tenant and returns an empty page rather than an error \u2014 the viewsets fail closed, so a forgotten header looks like an empty shop."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('not another tenant\\'s data', () =>",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401, 403]));",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test('empty rather than everything', () =>",
+                  "        pm.expect(pm.response.json().total_items).to.eql(0));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. A webhook with the wrong token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payments/webhooks/mpesa-c2b/wrong-token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "webhooks",
+                "mpesa-c2b",
+                "wrong-token"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TransID\": \"X\",\n  \"TransAmount\": \"1.00\",\n  \"MSISDN\": \"254700000000\",\n  \"BusinessShortCode\": \"174379\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "J9 \u00b7 HQ: support a shop without the superadmin flag",
+      "description": "Blendy's own staff. HQ is an organization like any other as far as RBAC is concerned, which is what lets platform staff use the same roles a shop's staff use.\n\n**Setup.** `python manage.py bootstrap_hq` prints the HQ id \u2014 put it in `hq_organization_id`. HQ is deliberately absent from `GET /api/organization/`, which lists customers only.\n\nRun **J1** first; this journey supports the shop J1 created.",
+      "item": [
+        {
+          "name": "1. Log in as superadmin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "The flag is retained as break-glass. Everything after this step uses roles instead.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{superadmin_email}}\",\n  \"password\": \"{{superadmin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('logged in', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Find HQ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/organization/platform/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "platform"
+              ]
+            },
+            "description": "HQ is deliberately absent from `GET /api/organization/`, which lists customers only \u2014 so this is how platform staff learn the id they send as X-Organization when working on HQ itself. Open to any holder of a `platform.*` permission."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('found', () => pm.response.to.have.status(200));",
+                  "const hq = pm.response.json();",
+                  "pm.test('it really is the platform org', () =>",
+                  "    pm.expect(hq.is_platform).to.be.true);",
+                  "pm.collectionVariables.set('hq_organization_id', hq.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Which roles does HQ have?",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{hq_organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/authorization/organization-roles/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "authorization",
+                "organization-roles"
+              ]
+            },
+            "description": "PLATFORM_ADMIN and SUPPORT_AGENT are enabled on HQ only \u2014 never on a shop."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reachable', () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json().results;",
+                  "const admin = rows.find(r => r.role.name === 'PLATFORM_ADMIN');",
+                  "const agent = rows.find(r => r.role.name === 'SUPPORT_AGENT');",
+                  "pm.test('platform roles enabled on HQ', () => {",
+                  "    pm.expect(admin).to.not.be.undefined;",
+                  "    pm.expect(agent).to.not.be.undefined;",
+                  "});",
+                  "pm.collectionVariables.set('platform_admin_role_id', admin.id);",
+                  "pm.collectionVariables.set('support_agent_role_id', agent.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Hire a platform admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{hq_organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@blendy.test\",\n  \"username\": \"admin@blendy.test\",\n  \"password\": \"hq-pass\",\n  \"organization_role_ids\": [\n    \"{{platform_admin_role_id}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('hired', () => pm.response.to.have.status(201));",
+                  "pm.test('holds PLATFORM_ADMIN', () =>",
+                  "    pm.expect(pm.response.json().assigned_roles).to.include('PLATFORM_ADMIN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Hire a support agent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{hq_organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"agent@blendy.test\",\n  \"username\": \"agent@blendy.test\",\n  \"password\": \"hq-pass\",\n  \"organization_role_ids\": [\n    \"{{support_agent_role_id}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('hired', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Log in as the platform admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@blendy.test\",\n  \"password\": \"hq-pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Onboard a shop \u2014 no flag involved",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/organization/onboard/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "onboard"
+              ]
+            },
+            "description": "This used to require `is_superuser_admin`. It now needs `platform.onboard_organization`, which is grantable and revocable per person.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization\": {\n    \"name\": \"Duka Mbili\",\n    \"slug\": \"duka-mbili\"\n  },\n  \"user\": {\n    \"email\": \"owner@dukambili.test\",\n    \"username\": \"owner@dukambili.test\",\n    \"password\": \"s3cret\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('onboarded', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Read the shop's sales to help them",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/sales/sales/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "sales",
+                "sales"
+              ]
+            },
+            "description": "Crossing the tenant boundary. The shop's own staff are unaffected; this request is what the access log exists to record."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('support can see the shop', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Log in as the support agent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"agent@blendy.test\",\n  \"password\": \"hq-pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10. Support reads\u2026",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/low-stock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "low-stock"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('allowed', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. \u2026but cannot touch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/inventory/stock/restock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "stock",
+                "restock"
+              ]
+            },
+            "description": "`platform.access_tenants` is a read grant. Writing needs `platform.act_as_tenant`, which SUPPORT_AGENT does not hold \u2014 and it holds no tenant write permission either, so both layers refuse independently.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_variation\": \"{{variation_id}}\",\n  \"quantity\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12. Support cannot read the access log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/organization/platform-access-log/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "platform-access-log"
+              ]
+            },
+            "description": "Reading who watched whom is an administrator's business."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13. Log back in as the platform admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@blendy.test\",\n  \"password\": \"hq-pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('access_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14. Every crossing is on the record",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/organization/platform-access-log/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "platform-access-log"
+              ]
+            },
+            "description": "Grants *and* denials, including the support agent's refused write above. Read-only for everyone \u2014 POST, PATCH and DELETE all return 405, superadmin included."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('readable', () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json().results;",
+                  "pm.test('the refused write is recorded', () =>",
+                  "    pm.expect(rows.some(r => r.granted === false)).to.be.true);",
+                  "pm.test('the granted read is recorded', () =>",
+                  "    pm.expect(rows.some(r => r.granted === true)).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15. The shop can see it too",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Organization",
+                "value": "{{organization_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/organization/access-log/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "access-log"
+              ]
+            },
+            "description": "The tenant-facing half. The same records, shown to the organization they are about \u2014 an assurance worth little if it depended on us answering.\n\nRun this as the shop owner from J1 to see the real thing: Blendy staff are named, while a *different* customer whose access was refused appears without being identified. Naming them would hand one shop another shop's staff email."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('platform admin can read it as the tenant', () =>",
+                  "    pm.response.to.have.status(200));",
+                  "const rows = pm.response.json().results;",
+                  "pm.test('blendy staff are named', () =>",
+                  "    pm.expect(rows.some(r => r.actor_is_platform",
+                  "        && String(r.actor).includes('@'))).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16. The log cannot be forged",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/organization/platform-access-log/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "organization",
+                "platform-access-log"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actor_email\": \"someone-else@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('no write path exists', () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

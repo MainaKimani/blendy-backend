@@ -161,13 +161,20 @@ class ProductVariationViewSet(OrganizationBaseViewSet):
 
     # Scope queryset by organization (VERY IMPORTANT in multi-tenant)
     def get_queryset(self):
+        # Tenancy comes from super(), which scopes to request.organization —
+        # the X-Organization header. This used to add a second filter on
+        # `request.user.organization`, which is the same thing for a member and
+        # so looked harmless, but is the caller's *own* organization rather than
+        # the one being addressed. Platform staff acting as a tenant have their
+        # own organization set to HQ, so the extra filter silently returned an
+        # empty list instead of the shop's variations.
+        #
         # `name` is a property that reads product.name and uom.symbol, and the
         # price comes off the pricelist, so all three are pulled in here rather
         # than fetched per row.
         return (
             super()
             .get_queryset()
-            .filter(organization=self.request.user.organization)
             .select_related("product", "uom", "currency")
             .prefetch_related("pricelist_items")
         )

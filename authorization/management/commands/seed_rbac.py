@@ -2,7 +2,13 @@
 
 from django.core.management.base import BaseCommand
 
-from authorization.rbac import ROLES, enable_default_roles, sync_rbac
+from authorization.rbac import (
+    PLATFORM_ROLES,
+    ROLES,
+    enable_default_roles,
+    enable_platform_roles,
+    sync_rbac,
+)
 
 
 class Command(BaseCommand):
@@ -16,6 +22,7 @@ class Command(BaseCommand):
         # A role that exists globally but is enabled for no organization looks
         # exactly like a role that was never seeded, so both halves are applied.
         enabled = enable_default_roles()
+        platform_enabled = enable_platform_roles()
 
         self.stdout.write(
             "Permissions: {permissions_total} total, {permissions_created} new".format(
@@ -26,6 +33,10 @@ class Command(BaseCommand):
             "Roles:       {roles_total} total, {roles_created} new".format(**summary)
         )
         for name, spec in ROLES.items():
-            self.stdout.write(f"  {name}: {len(spec['permissions']())} permissions")
+            marker = " (platform)" if name in PLATFORM_ROLES else ""
+            self.stdout.write(
+                f"  {name}: {len(spec['permissions']())} permissions{marker}"
+            )
         self.stdout.write(f"Enabled {enabled} new organization/role links")
+        self.stdout.write(f"Enabled {platform_enabled} new platform/role links")
         self.stdout.write(self.style.SUCCESS("RBAC catalogue is in sync."))

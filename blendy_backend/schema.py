@@ -61,6 +61,9 @@ ORGANIZATION_HEADER = openapi.Parameter(
 #   /authorization/permissions/, /authorization/roles/ — global catalogues,
 #                          superadmin only
 #   /payments/webhooks/  — called by Safaricom, authenticated by URL token + IP
+#   /organization/platform-access-log/ — HQ-wide by nature: it records access
+#                          *across* tenants, so scoping it to one would hide
+#                          exactly the rows worth reading
 TENANT_FREE_PREFIXES = (
     "/auth/",
     "/token/",

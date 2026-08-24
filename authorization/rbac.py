@@ -76,13 +76,40 @@ EXTRA_PERMISSIONS = {
     "inventory.view_lowstock": "See the low-stock queue",
     "payments.reconcile_payment": "Match or override a payment by hand",
     "sales.void_sale": "Void a sale (US-20, not yet implemented)",
+    "organization.view_access_log": (
+        "See who outside this organization accessed its data"
+    ),
     "reports.view_sales_report": "See sales and revenue reports (US-13/14, not yet implemented)",
     "reports.view_margin_report": "See cost and margin reports (US-14, not yet implemented)",
 }
 
 
-def permission_names():
-    """Every permission name in the catalogue."""
+# Permissions held by Blendy's own staff, never by a shop's.
+#
+# Kept in a separate pool from the tenant catalogue for one reason: ORG_ADMIN is
+# derived as "everything in the catalogue", so anything added to that pool lands
+# on every shop owner. A shop owner holding platform.access_tenants would be
+# able to read every other shop in the deployment.
+PLATFORM_PERMISSIONS = {
+    "platform.access_tenants": (
+        "Read another organization's data. The gate for support work; the "
+        "ordinary per-model permissions still decide what is visible."
+    ),
+    "platform.act_as_tenant": (
+        "Write to another organization's data. Deliberately separate from "
+        "access_tenants, so a support role can look without touching."
+    ),
+    "platform.onboard_organization": "Create a new customer organization",
+    "platform.manage_platform_staff": "Add and remove Blendy staff",
+    "platform.view_access_log": "See who accessed which organization",
+}
+
+
+def tenant_permission_names():
+    """Permissions that belong to running a shop.
+
+    This is what ORG_ADMIN holds. It must never include a `platform.*` name.
+    """
     names = []
     for app_label, models in CATALOGUE.items():
         for model in models:
@@ -92,7 +119,19 @@ def permission_names():
     return names
 
 
+def platform_permission_names():
+    """Permissions that belong to operating the platform."""
+    return list(PLATFORM_PERMISSIONS)
+
+
+def permission_names():
+    """Every permission that should exist as a row, tenant and platform alike."""
+    return tenant_permission_names() + platform_permission_names()
+
+
 def describe(name):
+    if name in PLATFORM_PERMISSIONS:
+        return PLATFORM_PERMISSIONS[name]
     if name in EXTRA_PERMISSIONS:
         return EXTRA_PERMISSIONS[name]
     app_label, rest = name.split(".", 1)
@@ -106,6 +145,10 @@ ORG_ADMIN = "ORG_ADMIN"
 CASHIER = "CASHIER"
 VIEWER = "VIEWER"
 
+# Blendy's own staff. These roles are enabled on the platform organization only.
+PLATFORM_ADMIN = "PLATFORM_ADMIN"
+SUPPORT_AGENT = "SUPPORT_AGENT"
+
 
 def _org_admin_permissions():
     """The shop owner holds everything.
@@ -113,8 +156,11 @@ def _org_admin_permissions():
     Deliberately derived rather than listed: a permission added to the catalogue
     and forgotten in this list would lock the owner out of their own shop, which
     is the exact failure this module exists to fix.
+
+    Derived from the *tenant* pool only. A shop owner must never hold a
+    `platform.*` permission — that would let them read every other shop.
     """
-    return set(permission_names())
+    return set(tenant_permission_names())
 
 
 def _cashier_permissions():
@@ -190,6 +236,39 @@ def _viewer_permissions():
     }
 
 
+def _support_agent_permissions():
+    """Read a shop's data to help them, and change nothing.
+
+    Two things combine here, and neither works alone:
+
+    * `platform.access_tenants` is the gate — without it IsOrganizationUser
+      refuses, because a Blendy employee is not a member of the shop.
+    * The tenant `view_*` set is what they can see once across that boundary.
+
+    Read-only falls out for free rather than being enforced separately: this
+    role holds no `add_`, `change_` or `delete_` permission and no
+    `platform.act_as_tenant`, so the ordinary per-action checks refuse every
+    write without any support-specific code.
+
+    Derived from the catalogue so a newly added model becomes visible to support
+    automatically, which is the safe direction — the alternative is a support
+    agent who cannot see the thing a shop is calling about.
+    """
+    return {"platform.access_tenants"} | {
+        name for name in tenant_permission_names() if ".view_" in name
+    }
+
+
+def _platform_admin_permissions():
+    """Blendy staff who can act, not only look.
+
+    Holds the whole platform pool *and* the whole tenant pool: this is the
+    delegable equivalent of the is_superuser_admin flag, and the point of it is
+    that it can be granted and revoked per person and shows up in the access log.
+    """
+    return set(platform_permission_names()) | set(tenant_permission_names())
+
+
 ROLES = {
     ORG_ADMIN: {
         "description": "Shop owner. Full access within their own organization.",
@@ -210,12 +289,31 @@ ROLES = {
         ),
         "permissions": _viewer_permissions,
     },
+    SUPPORT_AGENT: {
+        "description": (
+            "Blendy support. Reads any organization's data to answer a "
+            "question, and can change nothing."
+        ),
+        "permissions": _support_agent_permissions,
+    },
+    PLATFORM_ADMIN: {
+        "description": (
+            "Blendy platform administrator. Onboards organizations, manages "
+            "Blendy staff, and can act inside any organization."
+        ),
+        "permissions": _platform_admin_permissions,
+    },
 }
 
 # Enabled for every organization at onboarding, so an owner can hire a cashier
 # without first having to enable the role by hand, and so self-registration has
 # a VIEWER role to assign.
 DEFAULT_ORGANIZATION_ROLES = (ORG_ADMIN, CASHIER, VIEWER)
+
+# Enabled on the platform organization *only*. Enabling either of these on a
+# shop would hand that shop's staff a key to every other shop, so they are kept
+# out of DEFAULT_ORGANIZATION_ROLES rather than filtered out later.
+PLATFORM_ROLES = (PLATFORM_ADMIN, SUPPORT_AGENT)
 
 
 # --- Applying it -------------------------------------------------------------
@@ -285,6 +383,17 @@ def enable_default_roles(apps=None):
         OrganizationRole = apps.get_model("authorization", "OrganizationRole")
         Role = apps.get_model("authorization", "Role")
 
+    # HQ is not a shop. Enabling CASHIER and VIEWER on it would be harmless but
+    # incoherent — an organization that looks like it might sell something.
+    #
+    # Guarded rather than filtered unconditionally, because this runs from
+    # migrations that predate the is_platform field. At that point in history
+    # every organization is a tenant, so the filter would be a no-op anyway —
+    # but referencing a column that does not exist yet is a FieldError.
+    organizations = Organization.objects.all()
+    if any(f.name == "is_platform" for f in Organization._meta.get_fields()):
+        organizations = organizations.filter(is_platform=False)
+
     roles = [
         role
         for role in (
@@ -295,10 +404,46 @@ def enable_default_roles(apps=None):
     ]
 
     created = 0
-    for organization in Organization.objects.all():
+    for organization in organizations:
         for role in roles:
             _, was_created = OrganizationRole.objects.get_or_create(
                 organization=organization, role=role
             )
             created += int(was_created)
+    return created
+
+
+def enable_platform_roles(apps=None):
+    """Enable the platform roles on the HQ organization, and nowhere else.
+
+    Separate from `enable_default_roles` on purpose. That one walks every
+    customer; this one targets exactly one organization, because enabling
+    SUPPORT_AGENT on a shop would hand that shop's staff a key to every other
+    shop in the deployment.
+
+    Idempotent. Returns the number of links created, or 0 if HQ does not exist
+    yet — the roles still exist globally and can be enabled once it does.
+    """
+    if apps is None:
+        from organization.models import Organization
+
+        from .models import OrganizationRole, Role
+    else:
+        Organization = apps.get_model("organization", "Organization")
+        OrganizationRole = apps.get_model("authorization", "OrganizationRole")
+        Role = apps.get_model("authorization", "Role")
+
+    platform = Organization.objects.filter(is_platform=True).first()
+    if platform is None:
+        return 0
+
+    created = 0
+    for name in PLATFORM_ROLES:
+        role = Role.objects.filter(name=name).first()
+        if role is None:
+            continue
+        _, was_created = OrganizationRole.objects.get_or_create(
+            organization=platform, role=role
+        )
+        created += int(was_created)
     return created

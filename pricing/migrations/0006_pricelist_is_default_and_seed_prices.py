@@ -4,11 +4,21 @@ DEFAULT_PRICELIST_NAME = "Default Pricelist"
 
 
 def seed_default_pricelists(apps, schema_editor):
-    """Every existing organization needs a default pricelist to keep trading."""
+    """Every existing organization needs a default pricelist to keep trading.
+
+    Except Blendy's own HQ, which never sells. Guarded rather than filtered
+    unconditionally because the migration graph does not order this against the
+    one that adds `is_platform` — before that field exists every organization is
+    a tenant, so the filter is a no-op there.
+    """
     Organization = apps.get_model("organization", "Organization")
     Pricelist = apps.get_model("pricing", "Pricelist")
 
-    for organization in Organization.objects.all():
+    organizations = Organization.objects.all()
+    if any(f.name == "is_platform" for f in Organization._meta.get_fields()):
+        organizations = organizations.filter(is_platform=False)
+
+    for organization in organizations:
         if Pricelist.objects.filter(
             organization=organization, is_default=True
         ).exists():

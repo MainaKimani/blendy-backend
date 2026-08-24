@@ -127,6 +127,23 @@ REST_FRAMEWORK = {
 }
 
 
+# --- Platform access log retention -------------------------------------------
+# How long a cross-tenant access record is kept. This is the answer to "who
+# looked at my data?", so the default is long: a shop noticing something odd in
+# last quarter's figures should still be able to ask.
+PLATFORM_ACCESS_LOG_RETENTION_DAYS = int(
+    os.getenv("PLATFORM_ACCESS_LOG_RETENTION_DAYS", "365")
+)
+
+# A floor beneath which `prune_access_log` refuses to run at all. Pruning is a
+# privileged shell operation on an audit trail, and erasing the last few days is
+# exactly what someone covering their tracks would want to do. Raising the floor
+# is safe; lowering it should be a deliberate, reviewed change.
+PLATFORM_ACCESS_LOG_MINIMUM_RETENTION_DAYS = int(
+    os.getenv("PLATFORM_ACCESS_LOG_MINIMUM_RETENTION_DAYS", "30")
+)
+
+
 # The published schema, and the Swagger UI it drives. Basic auth is drf-yasg's
 # default and is not what this API uses; the tenancy header is added per
 # operation by the generator, since no view declares it.
@@ -158,6 +175,9 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "blendy_backend.middleware.OrganizationMiddleware",
+    # After OrganizationMiddleware, which resolves request.organization, and
+    # recording on the way out once DRF has authenticated the caller.
+    "organization.middleware.PlatformAccessLogMiddleware",
 ]
 
 ROOT_URLCONF = "blendy_backend.urls"

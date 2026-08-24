@@ -2052,7 +2052,7 @@
             "name": "organization",
             "item": [
                 {
-                    "name": "organization_list",
+                    "name": "Customer organizations.",
                     "request": {
                         "method": "GET",
                         "header": [],
@@ -2080,12 +2080,12 @@
                                 }
                             ]
                         },
-                        "description": ""
+                        "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list \u2014 and later, in\nits own billing run."
                     },
                     "response": []
                 },
                 {
-                    "name": "organization_create",
+                    "name": "Customer organizations.",
                     "request": {
                         "method": "POST",
                         "header": [
@@ -2104,7 +2104,7 @@
                                 "organization"
                             ]
                         },
-                        "description": "",
+                        "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list \u2014 and later, in\nits own billing run.",
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"name\": \"string\",\n    \"slug\": \"string\",\n    \"domain\": \"string\",\n    \"business_type\": \"string\",\n    \"contact_email\": \"user@example.com\",\n    \"contact_phone\": \"string\",\n    \"address\": \"string\",\n    \"tax_number\": \"string\",\n    \"mpesa_shortcode\": \"string\",\n    \"subscription_plan\": \"FREE\",\n    \"status\": \"ACTIVE\",\n    \"settings\": {},\n    \"subscription_expires_at\": \"2026-01-01T09:00:00Z\"\n}",
@@ -2114,6 +2114,61 @@
                                 }
                             }
                         }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Who outside this organization has reached into its data.",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/organization/access-log/?page=&page_size=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "organization",
+                                "access-log"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "",
+                                    "description": "A page number within the paginated result set.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page_size",
+                                    "value": "",
+                                    "description": "Number of results to return per page.",
+                                    "disabled": true
+                                }
+                            ]
+                        },
+                        "description": "The tenant-facing half of the audit trail. A shop whose revenue figures\nBlendy staff can read should be able to see when that happened, without\nasking us \u2014 an assurance that is worth little if it depends on us answering.\n\nScoped to the caller's own organization and read-only, like its HQ\ncounterpart. Where the two differ is *who gets named*: see\nTenantAccessLogSerializer."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Who outside this organization has reached into its data.",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/organization/access-log/:id/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "organization",
+                                "access-log",
+                                ":id"
+                            ]
+                        },
+                        "description": "The tenant-facing half of the audit trail. A shop whose revenue figures\nBlendy staff can read should be able to see when that happened, without\nasking us \u2014 an assurance that is worth little if it depends on us answering.\n\nScoped to the caller's own organization and read-only, like its HQ\ncounterpart. Where the two differ is *who gets named*: see\nTenantAccessLogSerializer."
                     },
                     "response": []
                 },
@@ -2152,7 +2207,96 @@
                     "response": []
                 },
                 {
-                    "name": "organization_read",
+                    "name": "Who reached into which organization, and whether they were allowed.",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/organization/platform-access-log/?page=&page_size=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "organization",
+                                "platform-access-log"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "",
+                                    "description": "A page number within the paginated result set.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page_size",
+                                    "value": "",
+                                    "description": "Number of results to return per page.",
+                                    "disabled": true
+                                }
+                            ]
+                        },
+                        "description": "Read-only by construction: an audit trail that its subject \u2014 or its actor \u2014\ncan edit is not one. There is no write path at all, not even for a\nsuperadmin, so the only way a row changes is a database migration.\n\nNot tenant-scoped. It records access *across* tenants, so scoping it to one\nwould hide exactly the rows worth looking at."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Who reached into which organization, and whether they were allowed.",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/organization/platform-access-log/:id/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "organization",
+                                "platform-access-log",
+                                ":id"
+                            ]
+                        },
+                        "description": "Read-only by construction: an audit trail that its subject \u2014 or its actor \u2014\ncan edit is not one. There is no write path at all, not even for a\nsuperadmin, so the only way a row changes is a database migration.\n\nNot tenant-scoped. It records access *across* tenants, so scoping it to one\nwould hide exactly the rows worth looking at."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "The platform (HQ) organization",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/organization/platform/?page=&page_size=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "organization",
+                                "platform"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "",
+                                    "description": "A page number within the paginated result set.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page_size",
+                                    "value": "",
+                                    "description": "Number of results to return per page.",
+                                    "disabled": true
+                                }
+                            ]
+                        },
+                        "description": "Blendy's own organization, which the customer listing deliberately excludes. Platform staff need its id to send as X-Organization when working on HQ itself \u2014 managing their own staff, for instance \u2014 and it is otherwise only obtainable from the shell.\n\nOpen to any holder of a `platform.*` permission, since knowing HQ exists is not itself sensitive."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Customer organizations.",
                     "request": {
                         "method": "GET",
                         "header": [],
@@ -2167,12 +2311,12 @@
                                 ":id"
                             ]
                         },
-                        "description": ""
+                        "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list \u2014 and later, in\nits own billing run."
                     },
                     "response": []
                 },
                 {
-                    "name": "organization_update",
+                    "name": "Customer organizations.",
                     "request": {
                         "method": "PUT",
                         "header": [
@@ -2192,7 +2336,7 @@
                                 ":id"
                             ]
                         },
-                        "description": "",
+                        "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list \u2014 and later, in\nits own billing run.",
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"name\": \"string\",\n    \"slug\": \"string\",\n    \"domain\": \"string\",\n    \"business_type\": \"string\",\n    \"contact_email\": \"user@example.com\",\n    \"contact_phone\": \"string\",\n    \"address\": \"string\",\n    \"tax_number\": \"string\",\n    \"mpesa_shortcode\": \"string\",\n    \"subscription_plan\": \"FREE\",\n    \"status\": \"ACTIVE\",\n    \"settings\": {},\n    \"subscription_expires_at\": \"2026-01-01T09:00:00Z\"\n}",
@@ -2206,7 +2350,7 @@
                     "response": []
                 },
                 {
-                    "name": "organization_partial_update",
+                    "name": "Customer organizations.",
                     "request": {
                         "method": "PATCH",
                         "header": [
@@ -2226,7 +2370,7 @@
                                 ":id"
                             ]
                         },
-                        "description": "",
+                        "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list \u2014 and later, in\nits own billing run.",
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"name\": \"string\",\n    \"slug\": \"string\",\n    \"domain\": \"string\",\n    \"business_type\": \"string\",\n    \"contact_email\": \"user@example.com\",\n    \"contact_phone\": \"string\",\n    \"address\": \"string\",\n    \"tax_number\": \"string\",\n    \"mpesa_shortcode\": \"string\",\n    \"subscription_plan\": \"FREE\",\n    \"status\": \"ACTIVE\",\n    \"settings\": {},\n    \"subscription_expires_at\": \"2026-01-01T09:00:00Z\"\n}",
@@ -2240,7 +2384,7 @@
                     "response": []
                 },
                 {
-                    "name": "organization_delete",
+                    "name": "Customer organizations.",
                     "request": {
                         "method": "DELETE",
                         "header": [],
@@ -2255,7 +2399,7 @@
                                 ":id"
                             ]
                         },
-                        "description": ""
+                        "description": "HQ is excluded: it is an Organization for RBAC's sake, not a tenant, and\nlisting it here would put Blendy in its own customer list \u2014 and later, in\nits own billing run."
                     },
                     "response": []
                 }

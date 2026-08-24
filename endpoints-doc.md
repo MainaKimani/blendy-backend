@@ -22,6 +22,7 @@ It is **multi-tenant**: one deployment serves many shops, and every piece of dat
 | **Sales** | Till and guest-checkout sales, priced and verified server-side against the pricelist |
 | **Payments** | M-Pesa STK push, plus reconciliation of direct Till payments when a push fails |
 | **Identity** | JWT auth, organizations, users, and a role/permission model |
+| **Platform** | An HQ organization whose staff can support any shop, with every crossing on the record |
 
 ### What it does not do yet
 
@@ -650,6 +651,151 @@ PATCH /api/users/<user-id>/                     { "organization_role_ids": ["<or
 
 The `Role` itself is global and superadmin-managed (`/api/authorization/roles/`); enabling it for a shop and assigning staff to it are the owner's.
 
+### 4.9 Platform (HQ)
+
+Blendy's own staff work from an **HQ organization** — a real `Organization` flagged `is_platform`, so platform roles run through the same RBAC a shop's staff use rather than a second, parallel system.
+
+HQ is **not** a customer: it is absent from `GET /api/organization/`, gets no default pricelist, and never has `CASHIER` or `VIEWER` enabled. There can only be one; a partial unique constraint enforces that in the database.
+
+```bash
+python manage.py bootstrap_hq                       # creates HQ, prints its id
+python manage.py bootstrap_hq --promote you@blendy.test
+```
+
+#### `GET /api/organization/platform/`
+
+HQ's id, without going to the shell. Platform staff need it to send as
+`X-Organization` when working on HQ itself — managing their own accounts, for
+instance.
+
+```json
+{ "id": "4447d480-…", "name": "Blendy HQ", "slug": "blendy-hq", "is_platform": true }
+```
+
+Open to **any** holder of a `platform.*` permission, not only administrators: a
+support agent needs the id as much as an admin does, and gating it on the
+superadmin flag would send them back to the shell. A shop's `ORG_ADMIN` holds
+all 87 tenant permissions and no platform one, so it is a `403` for them.
+
+`404` with a pointer to `bootstrap_hq` when no HQ exists.
+
+#### Platform roles
+
+| Role | Holds | Can |
+|---|---|---|
+| `SUPPORT_AGENT` | 24 | Read **any** organization. Change nothing. |
+| `PLATFORM_ADMIN` | 92 | Everything above, plus write, onboard shops, manage staff, read the access log. |
+
+`SUPPORT_AGENT` is read-only without any read-only code: it holds `platform.access_tenants` plus the tenant `view_*` set and **no** write permission, so the ordinary per-action checks refuse writes on their own.
+
+#### Platform permissions
+
+| | |
+|---|---|
+| `platform.access_tenants` | the gate — read an organization you are not in |
+| `platform.act_as_tenant` | write to it; deliberately a second, separate grant |
+| `platform.onboard_organization` | create a customer |
+| `platform.manage_platform_staff` | add and remove Blendy staff |
+| `platform.view_access_log` | see who accessed what, across every organization |
+
+The tenant-facing counterpart, `organization.view_access_log`, is a **tenant** permission — held by `ORG_ADMIN` by derivation, and scoped to that shop's own rows.
+
+**No tenant role holds any of these.** `ORG_ADMIN` is derived from the *tenant* pool only — were it derived from the whole catalogue, every shop owner would silently gain `access_tenants` and with it read access to every other shop.
+
+#### Crossing into a tenant
+
+Platform staff still send `X-Organization: <the shop>`. Three ways in:
+
+1. **Membership** — ordinary shop users.
+2. **`platform.access_tenants`** — reads; writes additionally need `platform.act_as_tenant`.
+3. **`is_superuser_admin`** — retained as break-glass, in the spirit of Django's `is_superuser`.
+
+Without a header it still fails closed: platform staff must name the shop they are entering.
+
+Measured:
+
+|  | OWNER | SUPPORT | PLATFORM_ADMIN | superadmin |
+|---|---|---|---|---|
+| `GET /sales/sales/` | 200 | **200** | 200 | 200 |
+| `POST /inventory/stock/restock/` | 201 | **403** | 201 | 201 |
+
+> **One exception.** `POST /api/sales/sales/` is `AllowAny` for guest checkout, so it never consults this gate — a support agent has exactly the power an anonymous caller already has, no more. Unlike an anonymous caller, their request is logged.
+
+#### `GET /api/organization/platform-access-log/`
+
+Every request that reaches an organization the caller is not in, **granted or refused**, including one shop probing another.
+
+```json
+{ "actor_email": "agent@blendy.test", "organization_slug": "mama-duka",
+  "method": "POST", "path": "/api/inventory/stock/restock/",
+  "status_code": 403, "granted": false, "created_at": "…" }
+```
+
+Filter with `?organization=`, `?actor=`, `?granted=`, `?method=`.
+
+Three properties worth knowing:
+
+- **Read-only by construction.** `POST`, `PATCH` and `DELETE` return `405` for everyone, superadmin included. The only way a row changes is a migration.
+- **Gated on `platform.view_access_log`**, which only `PLATFORM_ADMIN` holds. A shop's `ORG_ADMIN` has all 87 tenant permissions and still cannot read it.
+- **Actor email and organization slug are denormalised**, so the record still answers "who looked at my data?" after the staff account is deleted.
+
+A member's requests to their own organization are **not** logged — that would bury the rows that matter.
+
+#### `GET /api/organization/access-log/` — the shop's own view
+
+The tenant-facing half. A shop whose figures Blendy staff can read should be able to see when that happened **without asking us** — an assurance worth little if it depends on us answering.
+
+Same records, scoped to the caller's own organization, read-only. Held by `ORG_ADMIN` via `organization.view_access_log`; a cashier does not hold it, because who has been looking at the books is the owner's business.
+
+```json
+{ "actor": "agent@blendy.test", "actor_is_platform": true,
+  "method": "GET", "path": "/api/sales/sales/",
+  "status_code": 200, "granted": true, "created_at": "…" }
+```
+
+**The care is in what it withholds.** Blendy staff are named — that is the honest answer to "who looked at my data?", and what makes the support relationship legible. A *different customer* whose access was refused still appears, because a refused attempt is worth knowing about, but is not identified:
+
+```json
+{ "actor": "an account outside this organization", "actor_is_platform": false,
+  "status_code": 403, "granted": false }
+```
+
+Naming them would hand one shop another shop's staff email — leaking across exactly the boundary this log exists to watch. The raw email is absent from the payload, not merely relabelled; HQ's view still shows it in full.
+
+`actor_is_platform` is recorded at write time rather than derived on read, for the same reason the email is denormalised: the actor may later be deleted or change organizations, and a record whose meaning shifts afterwards is not an audit trail.
+
+Filter with `?granted=`, `?method=`, `?actor_is_platform=`. `DELETE` and `POST` return `405` — a shop cannot tidy away the record of who watched it any more than we can.
+
+#### Retention
+
+Entries are kept for **365 days** by default (`PLATFORM_ACCESS_LOG_RETENTION_DAYS`). The window is long on purpose: a shop noticing something odd in last quarter's figures should still be able to ask who looked.
+
+There is no worker in this deployment, so pruning is a cron job:
+
+```bash
+0 3 * * 0  python manage.py prune_access_log
+python manage.py prune_access_log --dry-run       # report only
+python manage.py prune_access_log --days 180      # override the window
+```
+
+**The command refuses to prune below 30 days** (`PLATFORM_ACCESS_LOG_MINIMUM_RETENTION_DAYS`), checked before anything is deleted:
+
+```
+CommandError: Refusing to prune to 1 days: the minimum retention is 30.
+An audit trail that can be trimmed to yesterday is not one.
+```
+
+Trimming the log to yesterday is exactly what someone covering their tracks would want, so a too-small window is refused rather than obeyed. The floor can be lowered by an explicit, reviewed settings change.
+
+Denials are pruned on the same schedule as grants — one policy, no special cases.
+
+#### Onboarding without the flag
+
+```http
+POST /api/organization/onboard/
+```
+Now requires `platform.onboard_organization` rather than `is_superuser_admin`. The flag still passes, because `HasUserPermission` short-circuits for superadmins.
+
 ---
 
 ## Known limitations
@@ -662,9 +808,11 @@ These are current behaviour, documented so they are not rediscovered as bugs.
 
 **3. `mpesa_shortcode` must be set before a second shop exists.** C2B reconciliation falls back to "the only organization" when no shortcode matches. That fallback is safe for exactly one tenant.
 
-**4. Products and payments do not check the catalogue yet.** Sales, inventory and pricing do. The product endpoints are open by design (anonymous browsing), and the payment endpoints gate on `IsAuthenticated` + `IsOrganizationUser` alone — so any member of an organization can read its payment records. Extending enforcement there is a further decision; note that `POST /api/payments/payments/` must stay open for guest checkout.
+**4. Pruning the access log is a shell operation.** There is no scheduler, so `prune_access_log` has to be run from cron. Nothing prunes itself.
 
-**5. Stock-take endpoints are scaffolding.** `/inventory/stock-takes/` stores rows but is not wired to the ledger. Use `/inventory/stock/adjust/` with `counted_quantity` for a real count.
+**5. Products and payments do not check the catalogue yet.** Sales, inventory and pricing do. The product endpoints are open by design (anonymous browsing), and the payment endpoints gate on `IsAuthenticated` + `IsOrganizationUser` alone — so any member of an organization can read its payment records. Extending enforcement there is a further decision; note that `POST /api/payments/payments/` must stay open for guest checkout.
+
+**6. Stock-take endpoints are scaffolding.** `/inventory/stock-takes/` stores rows but is not wired to the ledger. Use `/inventory/stock/adjust/` with `counted_quantity` for a real count.
 
 ---
 
