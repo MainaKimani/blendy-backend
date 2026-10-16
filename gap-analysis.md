@@ -303,3 +303,42 @@ Because the old price was per *product*, every variation of a product starts at 
 - `settings.py` still hardcodes `SECRET_KEY` and `DEBUG = True` with `ALLOWED_HOSTS = ["*"]`. Out of scope here, but must be resolved before any pilot deployment.
 - The default `LocMemCache` makes throttling per-process; a shared cache backend is needed in production.
 - **Updating a variation's `selling_price` is silently ignored.** `ProductVariationWriteSerializer.update` `setattr`s every validated field onto the model, and `selling_price` is not a model field, so a `PATCH` returns 200 with the price unchanged. The field is also required on `PUT`. Price changes currently have to go through `/api/pricing/pricelist-items/`. Either route the update to the default pricelist (as create does) or reject the field on update.
+
+---
+
+## 7. Online storefront track (added 2026-10-06)
+
+**Context:** the Suite serves both in-store POS and online shops (PRD §4.10). **Blendy Studio**, an online art-print shop, is the first online tenant. Its needs are being built as general, per-organization Suite features, not as an art-shop fork. This track runs alongside the MVP sequence in §5 and must not regress it: the existing suite stays green, and each feature is off by default for POS-only shops.
+
+The storefront frontend is `mitchy-fits-fe` (Angular 19), last changed 2026-06-12, **before** the August revamp. Full discovery notes: `~/Desktop/Claude/Blendy-studio/online-shop-discovery.md`.
+
+### 7.1 Already in place ✅
+
+Guest checkout (`SaleViewSet.create` is `AllowAny`), `shipping_*` fields on `Sale`, product images with compression and thumbnails, price lists with server-side price verification, STK push with direct-Till fallback, anonymous STK rate limiting, and product search, filters and pagination.
+
+### 7.2 Gaps ❌
+
+| # | Gap | Notes |
+|---|---|---|
+| 1 | **Storefront tenant resolution** | Guests send no `X-Organization`, so `OrganizationBaseViewSet` returns nothing and guest `create` returns 403. Needs domain-based or public-key resolution, so guests never send an internal organization id. |
+| 2 | **Public order tracking** | The checkout page reads `GET /api/sales/sales/{id}/` and `GET /api/payments/payments/{id}/`, both now staff-only. Needs a guest-safe status endpoint keyed by an unguessable token issued at sale creation. |
+| 3 | **Configurable variation options** | `ProductVariation.size` is a fixed `xs`–`xl` choice, `max_length=2`. Replace it with per-organization option types and values. Needs a data migration so existing Mitchy Fits sizes become option values. |
+| 4 | **Price rules by option** | Today every variation is priced individually on `PricelistItem`. Add category-wide prices for option combinations, with per-product overrides, resolved through `pricing/services.py` so sales still snapshot the price they used. |
+| 5 | **Stock mode: made to order / service** | `InsufficientStock` blocks every sale line (`sales/serializers.py:186`). Add a per-product or per-variation flag that skips the ledger movement. |
+| 6 | **Delivery settings** | Zones with fees, free zones, and an "owner quotes the fee" mode that holds payment until `shipping_fee` is set. |
+| 7 | **Fulfilment status** | `Sale.status` is `PENDING`/`COMPLETED`/`CANCELLED`. Add a fulfilment lifecycle separate from `payment_status`, auto-completed for POS sales. |
+| 8 | **Manual payment method** | M-Pesa confirmation code submitted by the customer and confirmed by staff, for shops without a Till or Paybill. STK and C2B need a Daraja shortcode, and a personal number can't receive them. |
+| 9 | **Order notifications** | No mail backend or worker exists (see §2.2 and §4.2). Start with a pluggable sender. |
+| 10 | **Product permissions** | Already open as §5 #11. It matters more with a public storefront: catalogue reads should stay anonymous, and writes must be permission-gated. |
+
+### 7.3 Found during discovery 🟡
+
+- **Guests can set `shipping_fee`.** It's in `SaleSerializer.Meta.fields` and not read-only, and sale `create` is `AllowAny`. A guest can submit any fee, including a negative one, which lowers `total_amount`, and the STK amount is checked against that total. Make it read-only for guests, set by delivery settings or staff, and validate it as `>= 0`.
+
+### 7.4 Suggested order
+
+1. Tenant resolution (#1) and public order tracking (#2): these unblock the existing storefront end to end.
+2. The `shipping_fee` fix (§7.3).
+3. Stock mode (#5) and fulfilment status (#7): small, and needed for any made-to-order shop.
+4. Variation options (#3), then price rules (#4): the largest piece, with a migration.
+5. Delivery settings (#6), manual payment (#8), notifications (#9).

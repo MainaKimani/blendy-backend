@@ -85,6 +85,24 @@ Health-specific add-ons — batch/expiry tracking, prescription/patient tie-in, 
 ### 4.9 Accountability & Reconciliation (new pillar — added post-ERPNext review, see §12)
 End-of-day/per-session cash-up: a per-cashier, per-day summary reconciling recorded sales against actual collections by payment method (M-Pesa auto-matched, M-Pesa manually matched, cash). This directly serves the staff-accountability/shrinkage problem named in §2.5, which the original pillars didn't have a dedicated feature addressing — reporting (4.6) covers trends, not shift-level reconciliation.
 
+### 4.10 Online Storefront (added 2026-10-06)
+Blendy serves **both in-store POS and online shops**. The same tenant, catalogue, price list, payments and sales records drive a shop's counter and its website, so an owner who sells in both places keeps one set of books.
+
+The first online tenant is **Blendy Studio**, a Nairobi art-print shop. Canvas prints are sold in seven sizes and two finishes, printed to order by a print shop, and delivered (free within the CBD, at courier cost elsewhere). Every capability below is built as a **general Suite feature that a shop switches on**, not as art-shop code. POS-only shops see no change.
+
+- **Configurable variation options.** Each shop defines its own option types and values (Size, Finish, Colour, Volume…). Variations are combinations of those values. This replaces the fixed clothing-size list.
+- **Price rules by option.** A price list can price an option combination for a whole category ("60×90 + Floating frame"), with per-product overrides. This is for shops whose price depends on the format, not the item.
+- **Stock mode per product:** tracked through the stock ledger, or made to order / service with no stock check.
+- **Delivery settings:** delivery zones with fees, free zones, and an "owner quotes the fee" mode that holds payment until the fee is set.
+- **Fulfilment status, separate from payment status.** POS sales are fulfilled straight away. Online orders move through stages, for example in production → dispatched → delivered.
+- **Public order tracking** by an unguessable token, so a guest can see their order and payment without an account.
+- **Storefront tenant resolution:** a shop's public site is tied to its organization by domain or a public storefront key, never by guests sending internal ids.
+- **Manual payment method:** the customer submits an M-Pesa confirmation code and staff confirm it. This is for shops that don't yet have a Till or Paybill, alongside STK push and direct-Till matching (4.3).
+- **Order notifications** (email, SMS or WhatsApp) through a pluggable sender.
+- **A reusable storefront.** One storefront app reads each shop's options, delivery settings and branding from the API. A new online shop is configuration, not a new build.
+
+This formalises the "e-commerce client reuse" in §3 (Tertiary) and §6 (Secondary revenue). Online shops become a supported tenant type rather than one-off client builds. Gap tracking lives in `gap-analysis.md` §7.
+
 ---
 
 ## 5. Vertical Strategy
@@ -142,6 +160,7 @@ Architecture principle throughout: **build general, sell vertical.** The codebas
 | MVP | Inventory, POS, M-Pesa reconciliation, eTIMS invoicing, basic reporting, multi-user, stock ledger, restock entry, sale void/credit-note, end-of-day cash-up | General retail SME, Nairobi |
 | Phase 2 | CRM, supplier/purchase orders, multi-branch, health compliance modules, credit/partial-payment sales, margin/profit reporting | General retail expansion + healthcare vertical |
 | Phase 3 | Horizontal expansion, e-commerce client reuse formalized, advanced analytics | Broader SME market across verticals |
+| Online storefront track (parallel, from 2026-10) | Online shop capabilities in §4.10, starting with Blendy Studio as the first online tenant | Online-first SMEs (made-to-order and stocked) |
 
 See `blendy-mvp.md` for detailed MVP scope, user stories, and validation test scenarios.
 
