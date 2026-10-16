@@ -89,6 +89,55 @@ class CustomUserViewSet(viewsets.ModelViewSet):
                         )
 
 
+class MeView(APIView):
+    """Who the caller is and what they may do.
+
+    A client needs this to decide which screens to offer. Nothing else answers
+    it for an ordinary user: login returns only ids, and `/api/users/{id}/` is
+    admin-only, so a cashier could not read their own roles.
+
+    Resolved against the caller's *own* organization, never the X-Organization
+    header — platform staff browsing a shop still hold only their HQ
+    permissions, and that is what the client must render against.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        organization = user.organization
+        return Response(
+            {
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "organization": (
+                    {
+                        "id": str(organization.id),
+                        "name": organization.name,
+                        "slug": organization.slug,
+                        "is_platform": organization.is_platform,
+                    }
+                    if organization
+                    else None
+                ),
+                "roles": sorted(
+                    user.role_assignments.filter(
+                        organization_role__organization_id=user.organization_id
+                    ).values_list("organization_role__role__name", flat=True)
+                ),
+                "permissions": sorted(user.get_permission_names()),
+                # Superadmins bypass every permission check, so a client cannot
+                # infer their access from the permission list alone.
+                "is_superuser_admin": bool(
+                    user.is_superuser or user.is_superuser_admin
+                ),
+            }
+        )
+
+
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
